@@ -1,15 +1,13 @@
 import sqlite3, uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from datetime import datetime
-from typing import Optional
 
 app = FastAPI()
-DB = 'tegegrom_final.db'
+DB = 'tegegrom_final_v19.db'
 
 def init_db():
     with sqlite3.connect(DB) as conn:
-        # Храним сообщения (ЛС и Общие)
         conn.execute('''CREATE TABLE IF NOT EXISTS messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT, 
             sender TEXT, receiver TEXT, content TEXT, 
@@ -25,7 +23,6 @@ async def index(): return UI
 async def get_users():
     with sqlite3.connect(DB) as conn:
         conn.row_factory = sqlite3.Row
-        # Собираем всех уникальных пользователей из базы
         res = conn.execute("SELECT DISTINCT sender FROM messages WHERE sender != 'all'").fetchall()
         return [r['sender'] for r in res]
 
@@ -56,65 +53,65 @@ UI = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>TegeGrom Final</title>
+    <title>TegeGrom Ultra</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root { --bg: #0e1621; --side: #17212b; --blue: #0088cc; --txt: #f5f5f5; --in: #182533; --out: #2b5278; }
         * { box-sizing: border-box; font-family: -apple-system, sans-serif; }
         body { margin: 0; background: var(--bg); color: var(--txt); height: 100vh; display: flex; overflow: hidden; }
         
-        /* Фикс для мобилок: поднимаем контент выше системных баров */
         #auth { position: fixed; inset: 0; z-index: 2000; background: var(--bg); display: flex; align-items: center; justify-content: center; }
         .auth-box { background: var(--side); padding: 30px; border-radius: 20px; text-align: center; width: 90%; max-width: 350px; }
         input { width: 100%; padding: 12px; margin: 10px 0; border-radius: 10px; border: 1px solid #242f3d; background: #0b1118; color: white; }
 
         #side { width: 300px; background: var(--side); border-right: 1px solid #000; display: flex; flex-direction: column; transition: 0.3s; z-index: 100; }
-        .chat-item { padding: 15px; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.2); transition: 0.2s; display: flex; align-items: center; gap: 10px; }
-        .chat-item:hover, .chat-item.active { background: var(--out); }
+        .chat-item { padding: 15px; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.2); display: flex; align-items: center; gap: 10px; }
+        .chat-item.active { background: var(--out); }
         .ava-circle { width: 35px; height: 35px; background: var(--blue); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
 
         #main { flex: 1; display: flex; flex-direction: column; background: #0e1117; position: relative; }
-        #feed { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; padding-bottom: 100px; }
+        #feed { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; padding-bottom: 120px; }
         
-        .msg { max-width: 85%; padding: 10px 14px; border-radius: 15px; font-size: 15px; position: relative; line-height: 1.4; }
+        .msg { max-width: 85%; padding: 10px 14px; border-radius: 15px; font-size: 15px; position: relative; }
         .msg.out { align-self: flex-end; background: var(--out); border-bottom-right-radius: 2px; }
         .msg.in { align-self: flex-start; background: var(--in); border-bottom-left-radius: 2px; }
         .msg img { max-width: 100%; border-radius: 10px; margin-top: 5px; }
         .time { font-size: 10px; opacity: 0.5; text-align: right; margin-top: 4px; }
 
-        /* Поднятая панель ввода */
+        /* ПАНЕЛЬ ЕЩЕ ВЫШЕ */
         .bar { 
-            padding: 15px; 
+            padding: 20px; 
             background: var(--side); 
             display: flex; 
             align-items: center; 
             gap: 12px; 
-            padding-bottom: calc(15px + env(safe-area-inset-bottom)); /* Поднимаем для iPhone */
+            padding-bottom: calc(30px + env(safe-area-inset-bottom)); 
             border-top: 1px solid rgba(0,0,0,0.3);
+            box-shadow: 0 -5px 15px rgba(0,0,0,0.2);
         }
-        .inp { flex: 1; background: #0b1118; border: none; padding: 12px 15px; color: white; border-radius: 20px; font-size: 16px; }
-        .icon { color: var(--blue); font-size: 22px; cursor: pointer; }
+        .inp { flex: 1; background: #0b1118; border: none; padding: 14px 18px; color: white; border-radius: 25px; font-size: 16px; }
+        .icon { color: var(--blue); font-size: 24px; cursor: pointer; }
 
         @media (max-width: 700px) {
             #side { position: absolute; width: 100%; height: 100%; left: 0; }
             body.chatting #side { transform: translateX(-100%); }
             .back { display: block !important; }
         }
-        .back { display: none; margin-right: 15px; cursor: pointer; font-size: 20px; color: var(--blue); }
+        .back { display: none; margin-right: 15px; cursor: pointer; font-size: 22px; color: var(--blue); }
     </style>
 </head>
 <body>
 
 <div id="auth">
     <div class="auth-box">
-        <h2 style="color:var(--blue)">TegeGrom v19</h2>
+        <h2 style="color:var(--blue)">TegeGrom Ultra</h2>
         <input type="text" id="my-name" placeholder="Никнейм">
-        <button onclick="login()" style="width:100%; padding:14px; background:var(--blue); border:none; color:white; border-radius:12px; font-weight:bold; cursor:pointer;">Войти</button>
+        <button onclick="login()" style="width:100%; padding:14px; background:var(--blue); border:none; color:white; border-radius:12px; font-weight:bold;">Войти</button>
     </div>
 </div>
 
 <div id="side">
-    <div style="padding:20px; border-bottom:1px solid #000; font-weight:bold; font-size:18px;">TegeGrom</div>
+    <div style="padding:20px; border-bottom:1px solid #000; font-weight:bold;">TegeGrom</div>
     <div class="chat-item active" id="btn-all" onclick="selectChat('all')">
         <div class="ava-circle">📢</div> <b>Общий чат</b>
     </div>
@@ -122,7 +119,7 @@ UI = """
 </div>
 
 <div id="main">
-    <div style="padding:15px; background:var(--side); display:flex; align-items:center; border-bottom:1px solid #000;">
+    <div style="padding:15px; background:var(--side); display:flex; align-items:center;">
         <i class="fa-solid fa-chevron-left back" onclick="document.body.classList.remove('chatting')"></i>
         <b id="header-title">Общий чат</b>
     </div>
@@ -135,7 +132,7 @@ UI = """
 </div>
 
 <script>
-    let myName = localStorage.getItem('tg_v19_user') || "";
+    let myName = localStorage.getItem('tg_ultra_user') || "";
     let target = "all";
     let lastId = 0;
     let isSyncing = false;
@@ -144,7 +141,7 @@ UI = """
 
     function login() {
         const n = document.getElementById('my-name').value.trim();
-        if(n) { localStorage.setItem('tg_v19_user', n); location.reload(); }
+        if(n) { localStorage.setItem('tg_ultra_user', n); location.reload(); }
     }
 
     function startApp() {
@@ -158,10 +155,8 @@ UI = """
         document.getElementById('header-title').innerText = t === 'all' ? 'Общий чат' : t;
         document.getElementById('feed').innerHTML = '';
         document.body.classList.add('chatting');
-        
         document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
         if(t === 'all') document.getElementById('btn-all').classList.add('active');
-        
         sync();
     }
 
@@ -184,7 +179,6 @@ UI = """
         const inp = document.getElementById('m-in');
         const txt = content || inp.value.trim();
         if(!txt && !file) return;
-        
         await fetch('/api/send', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -201,13 +195,11 @@ UI = """
             const r = await fetch(`/api/get/${myName}/${target}?last=${lastId}`);
             const data = await r.json();
             const f = document.getElementById('feed');
-            
             data.forEach(m => {
                 if(m.id > lastId) {
                     lastId = m.id;
                     const div = document.createElement('div');
                     div.className = `msg ${m.sender === myName ? 'out' : 'in'}`;
-                    
                     let body = m.type === 'img' ? `<img src="${m.file}" onclick="window.open(this.src)">` : `<span>${m.content}</span>`;
                     div.innerHTML = `<b style="font-size:11px; color:var(--blue)">${m.sender}</b><br>${body}<div class="time">${m.timestamp}</div>`;
                     f.appendChild(div);
