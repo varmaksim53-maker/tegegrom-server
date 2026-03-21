@@ -1,16 +1,15 @@
-import sqlite3, uvicorn, os
+import sqlite3, uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
 
 app = FastAPI()
-DB = 'tegegrom_v17.db'
+DB = 'tegegrom_final.db'
 
-# --- Инициализация БД ---
 def init_db():
     with sqlite3.connect(DB) as conn:
+        # Храним сообщения (ЛС и Общие)
         conn.execute('''CREATE TABLE IF NOT EXISTS messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT, 
             sender TEXT, receiver TEXT, content TEXT, 
@@ -22,16 +21,25 @@ init_db()
 @app.get("/", response_class=HTMLResponse)
 async def index(): return UI
 
+@app.get("/api/get_users")
+async def get_users():
+    with sqlite3.connect(DB) as conn:
+        conn.row_factory = sqlite3.Row
+        # Собираем всех уникальных пользователей из базы
+        res = conn.execute("SELECT DISTINCT sender FROM messages WHERE sender != 'all'").fetchall()
+        return [r['sender'] for r in res]
+
 @app.get("/api/get/{me}/{to}")
 async def get_msgs(me: str, to: str, last: int = 0):
     with sqlite3.connect(DB) as conn:
         conn.row_factory = sqlite3.Row
         if to == "all":
-            res = conn.execute("SELECT * FROM messages WHERE receiver='all' AND id > ? ORDER BY id ASC", (last,)).fetchall()
+            q = "SELECT * FROM messages WHERE receiver='all' AND id > ? ORDER BY id ASC"
+            params = (last,)
         else:
-            res = conn.execute("SELECT * FROM messages WHERE ((sender=? AND receiver=?) OR (sender=? AND receiver=?)) AND id > ? ORDER BY id ASC", 
-                               (me, to, to, me, last)).fetchall()
-        return [dict(r) for r in res]
+            q = "SELECT * FROM messages WHERE ((sender=? AND receiver=?) OR (sender=? AND receiver=?)) AND id > ? ORDER BY id ASC"
+            params = (me, to, to, me, last)
+        return [dict(r) for r in conn.execute(q, params).fetchall()]
 
 @app.post("/api/send")
 async def send_msg(d: dict):
@@ -42,103 +50,134 @@ async def send_msg(d: dict):
         conn.commit()
     return {"ok": True}
 
-# --- ИНТЕРФЕЙС ---
 UI = """
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>TegeGrom v17 Stable</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>TegeGrom Final</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root { --bg: #0e1621; --side: #17212b; --blue: #0088cc; --txt: #f5f5f5; --in: #182533; --out: #2b5278; }
-        * { box-sizing: border-box; font-family: sans-serif; }
+        * { box-sizing: border-box; font-family: -apple-system, sans-serif; }
         body { margin: 0; background: var(--bg); color: var(--txt); height: 100vh; display: flex; overflow: hidden; }
         
-        /* Авторизация */
-        #auth { position: fixed; inset: 0; z-index: 1000; background: var(--bg); display: flex; align-items: center; justify-content: center; }
+        /* Фикс для мобилок: поднимаем контент выше системных баров */
+        #auth { position: fixed; inset: 0; z-index: 2000; background: var(--bg); display: flex; align-items: center; justify-content: center; }
         .auth-box { background: var(--side); padding: 30px; border-radius: 20px; text-align: center; width: 90%; max-width: 350px; }
         input { width: 100%; padding: 12px; margin: 10px 0; border-radius: 10px; border: 1px solid #242f3d; background: #0b1118; color: white; }
 
-        /* Боковая панель */
-        #side { width: 300px; background: var(--side); border-right: 1px solid #000; display: flex; flex-direction: column; transition: 0.3s; }
-        .chat-item { padding: 15px; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.2); display: flex; align-items: center; gap: 10px; }
-        .chat-item:hover { background: rgba(255,255,255,0.05); }
-        .chat-item.active { background: var(--out); }
-        .ava { width: 40px; height: 40px; border-radius: 50%; background: var(--blue); display: flex; align-items:center; justify-content:center; }
+        #side { width: 300px; background: var(--side); border-right: 1px solid #000; display: flex; flex-direction: column; transition: 0.3s; z-index: 100; }
+        .chat-item { padding: 15px; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.2); transition: 0.2s; display: flex; align-items: center; gap: 10px; }
+        .chat-item:hover, .chat-item.active { background: var(--out); }
+        .ava-circle { width: 35px; height: 35px; background: var(--blue); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
 
-        /* Окно чата */
         #main { flex: 1; display: flex; flex-direction: column; background: #0e1117; position: relative; }
-        #feed { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 8px; }
+        #feed { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; padding-bottom: 100px; }
         
-        .msg { max-width: 85%; padding: 8px 12px; border-radius: 12px; line-height: 1.4; position: relative; font-size: 15px; }
+        .msg { max-width: 85%; padding: 10px 14px; border-radius: 15px; font-size: 15px; position: relative; line-height: 1.4; }
         .msg.out { align-self: flex-end; background: var(--out); border-bottom-right-radius: 2px; }
         .msg.in { align-self: flex-start; background: var(--in); border-bottom-left-radius: 2px; }
-        .msg img { max-width: 100%; border-radius: 8px; margin-top: 5px; cursor: pointer; }
+        .msg img { max-width: 100%; border-radius: 10px; margin-top: 5px; }
         .time { font-size: 10px; opacity: 0.5; text-align: right; margin-top: 4px; }
 
-        /* Поле ввода */
-        .input-area { padding: 10px; background: var(--side); display: flex; align-items: center; gap: 10px; }
-        .btn-icon { color: var(--blue); font-size: 20px; cursor: pointer; }
+        /* Поднятая панель ввода */
+        .bar { 
+            padding: 15px; 
+            background: var(--side); 
+            display: flex; 
+            align-items: center; 
+            gap: 12px; 
+            padding-bottom: calc(15px + env(safe-area-inset-bottom)); /* Поднимаем для iPhone */
+            border-top: 1px solid rgba(0,0,0,0.3);
+        }
+        .inp { flex: 1; background: #0b1118; border: none; padding: 12px 15px; color: white; border-radius: 20px; font-size: 16px; }
+        .icon { color: var(--blue); font-size: 22px; cursor: pointer; }
 
-        /* Мобильная адаптация */
         @media (max-width: 700px) {
-            #side { position: absolute; width: 100%; height: 100%; z-index: 100; }
-            body.in-chat #side { transform: translateX(-100%); }
+            #side { position: absolute; width: 100%; height: 100%; left: 0; }
+            body.chatting #side { transform: translateX(-100%); }
             .back { display: block !important; }
         }
-        .back { display: none; margin-right: 10px; cursor: pointer; font-size: 20px; }
+        .back { display: none; margin-right: 15px; cursor: pointer; font-size: 20px; color: var(--blue); }
     </style>
 </head>
 <body>
 
 <div id="auth">
     <div class="auth-box">
-        <h2 style="color:var(--blue)">TegeGrom</h2>
-        <input type="text" id="my-name" placeholder="Введите ваш ник">
-        <button onclick="saveName()" style="width:100%; padding:12px; background:var(--blue); border:none; color:white; border-radius:10px; cursor:pointer;">Войти</button>
+        <h2 style="color:var(--blue)">TegeGrom v19</h2>
+        <input type="text" id="my-name" placeholder="Никнейм">
+        <button onclick="login()" style="width:100%; padding:14px; background:var(--blue); border:none; color:white; border-radius:12px; font-weight:bold; cursor:pointer;">Войти</button>
     </div>
 </div>
 
 <div id="side">
-    <div style="padding:15px; border-bottom:1px solid #000;"><b>Чаты</b></div>
-    <div class="chat-item" onclick="selectChat('all')"><div class="ava">📢</div><b>Общий чат</b></div>
-    <div id="contacts"></div>
+    <div style="padding:20px; border-bottom:1px solid #000; font-weight:bold; font-size:18px;">TegeGrom</div>
+    <div class="chat-item active" id="btn-all" onclick="selectChat('all')">
+        <div class="ava-circle">📢</div> <b>Общий чат</b>
+    </div>
+    <div id="contacts-list" style="overflow-y:auto; flex:1;"></div>
 </div>
 
 <div id="main">
-    <div style="padding:15px; background:var(--side); display:flex; align-items:center;">
-        <i class="fa-solid fa-arrow-left back" onclick="document.body.classList.remove('in-chat')"></i>
-        <b id="chat-title">Выберите чат</b>
+    <div style="padding:15px; background:var(--side); display:flex; align-items:center; border-bottom:1px solid #000;">
+        <i class="fa-solid fa-chevron-left back" onclick="document.body.classList.remove('chatting')"></i>
+        <b id="header-title">Общий чат</b>
     </div>
     <div id="feed"></div>
-    <div class="input-area">
-        <label class="btn-icon"><i class="fa-solid fa-image"></i><input type="file" id="f-in" hidden onchange="upFile()"></label>
-        <input type="text" id="m-in" class="input" style="flex:1; background:#0b1118; border:none; padding:10px; color:white; border-radius:15px;" placeholder="Сообщение..." onkeypress="if(event.key==='Enter')send('text')">
-        <i class="fa-solid fa-paper-plane btn-icon" onclick="send('text')"></i>
+    <div class="bar">
+        <label class="icon"><i class="fa-solid fa-paperclip"></i><input type="file" id="f-in" hidden onchange="upFile()"></label>
+        <input type="text" id="m-in" class="inp" placeholder="Сообщение..." onkeypress="if(event.key==='Enter')send('text')">
+        <i class="fa-solid fa-paper-plane icon" onclick="send('text')"></i>
     </div>
 </div>
 
 <script>
-    let me = localStorage.getItem('tg_name') || "";
+    let myName = localStorage.getItem('tg_v19_user') || "";
     let target = "all";
     let lastId = 0;
-    let syncing = false;
+    let isSyncing = false;
 
-    if(me) { document.getElementById('auth').style.display='none'; startSync(); }
+    if(myName) { document.getElementById('auth').style.display='none'; startApp(); }
 
-    function saveName() {
+    function login() {
         const n = document.getElementById('my-name').value.trim();
-        if(n) { localStorage.setItem('tg_name', n); location.reload(); }
+        if(n) { localStorage.setItem('tg_v19_user', n); location.reload(); }
+    }
+
+    function startApp() {
+        setInterval(sync, 1500);
+        setInterval(loadUsers, 5000);
+        loadUsers();
     }
 
     function selectChat(t) {
         target = t; lastId = 0;
-        document.getElementById('chat-title').innerText = t === 'all' ? 'Общий чат' : t;
+        document.getElementById('header-title').innerText = t === 'all' ? 'Общий чат' : t;
         document.getElementById('feed').innerHTML = '';
-        document.body.classList.add('in-chat');
+        document.body.classList.add('chatting');
+        
+        document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
+        if(t === 'all') document.getElementById('btn-all').classList.add('active');
+        
         sync();
+    }
+
+    async function loadUsers() {
+        const r = await fetch('/api/get_users');
+        const users = await r.json();
+        const list = document.getElementById('contacts-list');
+        let html = '';
+        users.forEach(u => {
+            if(u !== myName) {
+                html += `<div class="chat-item ${target===u?'active':''}" onclick="selectChat('${u}')">
+                    <div class="ava-circle" style="background:#2b5278">${u[0].toUpperCase()}</div> <b>${u}</b>
+                </div>`;
+            }
+        });
+        list.innerHTML = html;
     }
 
     async function send(type, content='', file='') {
@@ -149,17 +188,17 @@ UI = """
         await fetch('/api/send', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({s:me, r:target, c:txt, t:type, f:file})
+            body: JSON.stringify({s:myName, r:target, c:txt, t:type, f:file})
         });
         inp.value = '';
         sync();
     }
 
     async function sync() {
-        if(syncing || !me) return;
-        syncing = true;
+        if(isSyncing || !myName) return;
+        isSyncing = true;
         try {
-            const r = await fetch(`/api/get/${me}/${target}?last=${lastId}`);
+            const r = await fetch(`/api/get/${myName}/${target}?last=${lastId}`);
             const data = await r.json();
             const f = document.getElementById('feed');
             
@@ -167,25 +206,24 @@ UI = """
                 if(m.id > lastId) {
                     lastId = m.id;
                     const div = document.createElement('div');
-                    div.className = `msg ${m.sender === me ? 'out' : 'in'}`;
+                    div.className = `msg ${m.sender === myName ? 'out' : 'in'}`;
                     
                     let body = m.type === 'img' ? `<img src="${m.file}" onclick="window.open(this.src)">` : `<span>${m.content}</span>`;
-                    div.innerHTML = `<b style="font-size:12px; color:var(--blue)">${m.sender}</b><br>${body}<div class="time">${m.timestamp}</div>`;
+                    div.innerHTML = `<b style="font-size:11px; color:var(--blue)">${m.sender}</b><br>${body}<div class="time">${m.timestamp}</div>`;
                     f.appendChild(div);
                     f.scrollTop = f.scrollHeight;
                 }
             });
-        } finally { syncing = false; }
+        } finally { isSyncing = false; }
     }
 
     function upFile() {
         const file = document.getElementById('f-in').files[0];
+        if(!file) return;
         const reader = new FileReader();
         reader.onload = () => send('img', '', reader.result);
         reader.readAsDataURL(file);
     }
-
-    function startSync() { setInterval(sync, 1500); }
 </script>
 </body>
 </html>
