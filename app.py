@@ -4,7 +4,7 @@ from fastapi.responses import HTMLResponse
 from datetime import datetime
 
 app = FastAPI()
-DB = 'tegegrom_final_v19.db'
+DB = 'tegegrom_v21_final.db'
 
 def init_db():
     with sqlite3.connect(DB) as conn:
@@ -53,7 +53,7 @@ UI = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>TegeGrom Ultra</title>
+    <title>TegeGrom Premium</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root { --bg: #0e1621; --side: #17212b; --blue: #0088cc; --txt: #f5f5f5; --in: #182533; --out: #2b5278; }
@@ -62,56 +62,57 @@ UI = """
         
         #auth { position: fixed; inset: 0; z-index: 2000; background: var(--bg); display: flex; align-items: center; justify-content: center; }
         .auth-box { background: var(--side); padding: 30px; border-radius: 20px; text-align: center; width: 90%; max-width: 350px; }
-        input { width: 100%; padding: 12px; margin: 10px 0; border-radius: 10px; border: 1px solid #242f3d; background: #0b1118; color: white; }
+        input { width: 100%; padding: 12px; margin: 10px 0; border-radius: 10px; border: 1px solid #242f3d; background: #0b1118; color: white; outline: none; }
 
         #side { width: 300px; background: var(--side); border-right: 1px solid #000; display: flex; flex-direction: column; transition: 0.3s; z-index: 100; }
-        .chat-item { padding: 15px; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.2); display: flex; align-items: center; gap: 10px; }
-        .chat-item.active { background: var(--out); }
-        .ava-circle { width: 35px; height: 35px; background: var(--blue); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+        .chat-item { padding: 15px; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.1); display: flex; align-items: center; gap: 12px; }
+        .chat-item:hover, .chat-item.active { background: var(--out); }
+        .ava-circle { width: 42px; height: 42px; background: var(--blue); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
 
         #main { flex: 1; display: flex; flex-direction: column; background: #0e1117; position: relative; }
-        #feed { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; padding-bottom: 120px; }
+        #feed { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 8px; padding-bottom: 160px; scroll-behavior: smooth; }
         
-        .msg { max-width: 85%; padding: 10px 14px; border-radius: 15px; font-size: 15px; position: relative; }
-        .msg.out { align-self: flex-end; background: var(--out); border-bottom-right-radius: 2px; }
-        .msg.in { align-self: flex-start; background: var(--in); border-bottom-left-radius: 2px; }
-        .msg img { max-width: 100%; border-radius: 10px; margin-top: 5px; }
+        .msg { max-width: 80%; padding: 10px 14px; border-radius: 16px; font-size: 15px; line-height: 1.4; position: relative; }
+        .msg.out { align-self: flex-end; background: var(--out); border-bottom-right-radius: 4px; }
+        .msg.in { align-self: flex-start; background: var(--in); border-bottom-left-radius: 4px; }
+        .msg img { max-width: 100%; border-radius: 8px; margin-top: 6px; }
         .time { font-size: 10px; opacity: 0.5; text-align: right; margin-top: 4px; }
 
-        /* ПАНЕЛЬ ЕЩЕ ВЫШЕ */
+        /* ЕЩЕ ВЫШЕ И КРУЧЕ ДЛЯ ТЕЛЕФОНОВ */
         .bar { 
-            padding: 20px; 
+            padding: 15px 20px; 
             background: var(--side); 
             display: flex; 
             align-items: center; 
-            gap: 12px; 
-            padding-bottom: calc(30px + env(safe-area-inset-bottom)); 
-            border-top: 1px solid rgba(0,0,0,0.3);
-            box-shadow: 0 -5px 15px rgba(0,0,0,0.2);
+            gap: 15px; 
+            padding-bottom: calc(50px + env(safe-area-inset-bottom)); /* Подняли еще на 15px */
+            border-top: 1px solid rgba(255,255,255,0.05);
+            position: absolute; bottom: 0; left: 0; right: 0;
+            box-shadow: 0 -10px 20px rgba(0,0,0,0.3);
         }
-        .inp { flex: 1; background: #0b1118; border: none; padding: 14px 18px; color: white; border-radius: 25px; font-size: 16px; }
-        .icon { color: var(--blue); font-size: 24px; cursor: pointer; }
+        .inp { flex: 1; background: #0b1118; border: none; padding: 12px 18px; color: white; border-radius: 25px; font-size: 16px; outline: none; }
+        .icon { color: var(--blue); font-size: 26px; cursor: pointer; }
 
         @media (max-width: 700px) {
             #side { position: absolute; width: 100%; height: 100%; left: 0; }
             body.chatting #side { transform: translateX(-100%); }
             .back { display: block !important; }
         }
-        .back { display: none; margin-right: 15px; cursor: pointer; font-size: 22px; color: var(--blue); }
+        .back { display: none; margin-right: 15px; cursor: pointer; font-size: 24px; color: var(--blue); }
     </style>
 </head>
 <body>
 
 <div id="auth">
     <div class="auth-box">
-        <h2 style="color:var(--blue)">TegeGrom Ultra</h2>
+        <h2 style="color:var(--blue)">TegeGrom</h2>
         <input type="text" id="my-name" placeholder="Никнейм">
         <button onclick="login()" style="width:100%; padding:14px; background:var(--blue); border:none; color:white; border-radius:12px; font-weight:bold;">Войти</button>
     </div>
 </div>
 
 <div id="side">
-    <div style="padding:20px; border-bottom:1px solid #000; font-weight:bold;">TegeGrom</div>
+    <div style="padding:20px; border-bottom:1px solid rgba(0,0,0,0.3); font-weight:bold; font-size:20px;">Чаты</div>
     <div class="chat-item active" id="btn-all" onclick="selectChat('all')">
         <div class="ava-circle">📢</div> <b>Общий чат</b>
     </div>
@@ -119,20 +120,20 @@ UI = """
 </div>
 
 <div id="main">
-    <div style="padding:15px; background:var(--side); display:flex; align-items:center;">
-        <i class="fa-solid fa-chevron-left back" onclick="document.body.classList.remove('chatting')"></i>
-        <b id="header-title">Общий чат</b>
+    <div style="padding:12px 20px; background:var(--side); display:flex; align-items:center; border-bottom:1px solid rgba(0,0,0,0.3);">
+        <i class="fa-solid fa-arrow-left back" onclick="document.body.classList.remove('chatting')"></i>
+        <b id="header-title" style="font-size: 18px;">Общий чат</b>
     </div>
     <div id="feed"></div>
     <div class="bar">
         <label class="icon"><i class="fa-solid fa-paperclip"></i><input type="file" id="f-in" hidden onchange="upFile()"></label>
         <input type="text" id="m-in" class="inp" placeholder="Сообщение..." onkeypress="if(event.key==='Enter')send('text')">
-        <i class="fa-solid fa-paper-plane icon" onclick="send('text')"></i>
+        <i class="fa-solid fa-circle-arrow-up icon" onclick="send('text')"></i>
     </div>
 </div>
 
 <script>
-    let myName = localStorage.getItem('tg_ultra_user') || "";
+    let myName = localStorage.getItem('tg_v21_user') || "";
     let target = "all";
     let lastId = 0;
     let isSyncing = false;
@@ -141,7 +142,7 @@ UI = """
 
     function login() {
         const n = document.getElementById('my-name').value.trim();
-        if(n) { localStorage.setItem('tg_ultra_user', n); location.reload(); }
+        if(n) { localStorage.setItem('tg_v21_user', n); location.reload(); }
     }
 
     function startApp() {
