@@ -4,7 +4,7 @@ from fastapi.responses import HTMLResponse
 from datetime import datetime
 
 app = FastAPI()
-DB = 'tegegrom_v21_final.db'
+DB = 'tegegrom_v31_final.db'
 
 def init_db():
     with sqlite3.connect(DB) as conn:
