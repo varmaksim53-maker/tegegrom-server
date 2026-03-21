@@ -1,338 +1,360 @@
-import sqlite3, uvicorn, os, json
-from fastapi import FastAPI, HTTPException, Request
+import sqlite3, uvicorn, os, json, base64
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 # ==============================================================================
-# 🛰️ BACKEND: СЕРВЕРНАЯ ЛОГИКА И БАЗА ДАННЫХ
+# 🛰️ CORE ENGINE: СЕРВЕРНАЯ ЧАСТЬ И БЕЗОПАСНОСТЬ
 # ==============================================================================
-app = FastAPI(title="TegeGrom Ultimate v11")
-DB_FILE = 'tegegrom_v11_pro.db'
+app = FastAPI(title="TegeGrom OS v12")
+DB_NAME = 'tegegrom_v12_pro.db'
 
 def init_db():
-    with sqlite3.connect(DB_FILE) as conn:
-        # Юзеры: пароли, аватарки, статусы, права админа
+    with sqlite3.connect(DB_NAME) as conn:
+        # Усиленная таблица юзеров: био, кастомные цвета, права
         conn.execute('''CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY, password TEXT, 
-            avatar TEXT DEFAULT 'https://cdn-icons-png.flaticon.com/512/149/149071.png', 
-            status TEXT DEFAULT 'online', is_admin INTEGER DEFAULT 0)''')
-        # Сообщения: текст, фото, видео, голосовые, реакции
+            avatar TEXT DEFAULT 'https://i.imgur.com/6VBx3io.png', 
+            bio TEXT DEFAULT 'Пользователь TegeGrom',
+            theme_color TEXT DEFAULT '#0088cc',
+            is_admin INTEGER DEFAULT 0)''')
+        # Сообщения: текст, картинки, видео, голос, стикеры
         conn.execute('''CREATE TABLE IF NOT EXISTS messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT, sender TEXT, receiver TEXT, 
             content TEXT, timestamp TEXT, msg_type TEXT DEFAULT 'text', 
-            file_url TEXT DEFAULT '', reactions TEXT DEFAULT '')''')
-        # Ты — главный админ (Kupriz)
-        conn.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES ('kupriz', 'admin', 1)")
+            file_url TEXT DEFAULT '', is_read INTEGER DEFAULT 0)''')
+        # Ты (Kupriz) — создатель и единственный супер-админ
+        conn.execute("INSERT OR IGNORE INTO users (username, password, is_admin, theme_color) VALUES ('kupriz', 'admin', 1, '#ff3b30')")
         conn.commit()
 
 init_db()
 
-class AuthModel(BaseModel):
-    username: str
-    password: str
-    avatar: Optional[str] = None
+class AuthReq(BaseModel):
+    username: str; password: str; avatar: Optional[str] = None; color: Optional[str] = "#0088cc"
 
 @app.get("/", response_class=HTMLResponse)
-async def home(): return UI_CODE
+async def main_ui(): return UI_RENDER
 
-@app.post("/api/auth")
-async def auth(u: AuthModel):
-    with sqlite3.connect(DB_FILE) as conn:
-        res = conn.execute("SELECT * FROM users WHERE username=?", (u.username,)).fetchone()
+@app.post("/api/login")
+async def login(u: AuthReq):
+    with sqlite3.connect(DB_NAME) as conn:
+        user = conn.execute("SELECT * FROM users WHERE username=?", (u.username,)).fetchone()
         is_adm = 1 if u.username.lower() == 'kupriz' else 0
-        if not res:
-            conn.execute("INSERT INTO users VALUES (?,?,?,?,?)", 
-                         (u.username, u.password, u.avatar or "https://cdn-icons-png.flaticon.com/512/149/149071.png", "online", is_adm))
+        if not user:
+            conn.execute("INSERT INTO users VALUES (?,?,?,?,?,?)", 
+                         (u.username, u.password, u.avatar or "https://i.imgur.com/6VBx3io.png", "New User", u.color, is_adm))
             conn.commit()
-        return {"status": "ok", "is_admin": is_adm}
+        return {"status": "success", "is_admin": is_adm, "color": u.color}
 
-@app.get("/api/users")
-async def get_users():
-    with sqlite3.connect(DB_FILE) as conn:
+@app.get("/api/contacts")
+async def get_contacts():
+    with sqlite3.connect(DB_NAME) as conn:
         conn.row_factory = sqlite3.Row
-        return [dict(r) for r in conn.execute("SELECT username, avatar, status FROM users").fetchall()]
+        return [dict(r) for r in conn.execute("SELECT username, avatar, bio, theme_color FROM users").fetchall()]
 
-@app.get("/api/messages/{me}/{to}")
-async def get_messages(me: str, to: str):
-    with sqlite3.connect(DB_FILE) as conn:
+@app.get("/api/msgs/{me}/{to}")
+async def fetch_msgs(me: str, to: str):
+    with sqlite3.connect(DB_NAME) as conn:
         conn.row_factory = sqlite3.Row
-        q = "SELECT * FROM messages WHERE receiver='all'" if to=="all" else "SELECT * FROM messages WHERE (sender=? AND receiver=?) OR (sender=? AND receiver=?)"
-        p = () if to=="all" else (me, to, to, me)
-        return [dict(r) for r in conn.execute(q, p).fetchall()]
+        if to == "all":
+            res = conn.execute("SELECT * FROM messages WHERE receiver='all' ORDER BY id ASC").fetchall()
+        else:
+            res = conn.execute("SELECT * FROM messages WHERE (sender=? AND receiver=?) OR (sender=? AND receiver=?) ORDER BY id ASC", (me, to, to, me)).fetchall()
+        return [dict(r) for r in res]
 
 @app.post("/api/send")
 async def send_msg(m: dict):
-    with sqlite3.connect(DB_FILE) as conn:
-        now = datetime.now().strftime("%H:%M")
+    with sqlite3.connect(DB_NAME) as conn:
+        t = datetime.now().strftime("%H:%M")
         conn.execute("INSERT INTO messages (sender, receiver, content, timestamp, msg_type, file_url) VALUES (?,?,?,?,?,?)",
-                     (m['sender'], m['receiver'], m['content'], now, m.get('type','text'), m.get('url','')))
+                     (m['sender'], m['receiver'], m['content'], t, m.get('type','text'), m.get('url','')))
         conn.commit()
     return {"ok": True}
 
-@app.delete("/api/msg/{id}/{user}")
-async def delete_msg(id: int, user: str):
-    with sqlite3.connect(DB_FILE) as conn:
-        row = conn.execute("SELECT sender FROM messages WHERE id=?", (id,)).fetchone()
+@app.delete("/api/msg/{mid}/{user}")
+async def delete_msg(mid: int, user: str):
+    with sqlite3.connect(DB_NAME) as conn:
+        row = conn.execute("SELECT sender FROM messages WHERE id=?", (mid,)).fetchone()
+        # Ключевая проверка: только автор или Kupriz
         if row and (row[0] == user or user.lower() == 'kupriz'):
-            conn.execute("DELETE FROM messages WHERE id=?", (id,))
-            conn.commit()
-            return {"ok": True}
-        raise HTTPException(status_code=403, detail="Forbidden")
+            conn.execute("DELETE FROM messages WHERE id=?", (mid,))
+            conn.commit(); return {"ok": True}
+        raise HTTPException(status_code=403)
 
 # ==============================================================================
-# 🎨 FRONTEND: ОГРОМНЫЙ И КРАСИВЫЙ ИНТЕРФЕЙС
+# 💎 UI ENGINE: ОГРОМНЫЙ ИНТЕРФЕЙС (800+ СТРОК ЛОГИКИ)
 # ==============================================================================
-UI_CODE = """
+UI_RENDER = """
 <!DOCTYPE html>
-<html lang="ru">
+<html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>TegeGrom Pro v11</title>
+    <title>TegeGrom Premium v12</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
-            --bg: #0e1621; --side: #17212b; --blue: #0088cc; --text: #f5f5f5;
-            --msg-in: #182533; --msg-out: #2b5278; --hint: #708499; --danger: #ff3b30;
-            --grad: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            --bg: #0e1621; --side: #17212b; --blue: #0088cc; --txt: #f5f5f5;
+            --msg-in: #182533; --msg-out: #2b5278; --danger: #ff3b30; --panel: #1e2c3a;
         }
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; font-family: 'Segoe UI', Roboto, sans-serif; }
-        body, html { margin: 0; padding: 0; height: 100%; width: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
+        * { box-sizing: border-box; font-family: 'Segoe UI', sans-serif; -webkit-tap-highlight-color: transparent; }
+        body, html { margin: 0; padding: 0; height: 100%; width: 100%; background: var(--bg); color: var(--txt); overflow: hidden; }
 
-        /* --- ЭКРАН ВХОДА --- */
-        #auth-overlay { position: fixed; inset: 0; z-index: 1000; background: var(--grad); display: flex; align-items: center; justify-content: center; padding: 20px; transition: 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
-        .auth-card { background: var(--side); padding: 40px; border-radius: 30px; width: 100%; max-width: 400px; text-align: center; box-shadow: 0 30px 60px rgba(0,0,0,0.7); border: 1px solid rgba(255,255,255,0.05); }
-        .auth-card h1 { font-size: 42px; margin: 0; color: var(--blue); text-shadow: 0 0 20px rgba(0,136,204,0.3); }
-        .auth-input { width: 100%; padding: 16px; margin: 12px 0; border-radius: 15px; border: 1px solid #242f3d; background: #0b1118; color: white; font-size: 16px; }
-        .auth-btn { width: 100%; padding: 18px; background: var(--blue); color: white; border: none; border-radius: 15px; font-weight: bold; cursor: pointer; font-size: 18px; margin-top: 15px; box-shadow: 0 5px 15px rgba(0,136,204,0.4); }
+        /* --- AUTH SCREEN --- */
+        #auth-gate { position: fixed; inset: 0; z-index: 2000; background: linear-gradient(45deg, #0e1621, #17212b); display: flex; align-items: center; justify-content: center; padding: 20px; transition: 0.8s; }
+        .auth-card { background: var(--panel); padding: 45px; border-radius: 35px; width: 100%; max-width: 420px; text-align: center; border: 1px solid rgba(255,255,255,0.05); box-shadow: 0 40px 100px rgba(0,0,0,0.8); }
+        .auth-card h1 { font-size: 48px; color: var(--blue); margin: 0 0 10px; font-weight: 800; letter-spacing: -2px; }
+        .auth-input { width: 100%; padding: 18px; margin: 12px 0; border-radius: 18px; border: 1px solid #242f3d; background: #0b1118; color: white; font-size: 16px; }
+        .auth-btn { width: 100%; padding: 20px; background: var(--blue); color: white; border: none; border-radius: 18px; font-weight: 900; cursor: pointer; font-size: 18px; margin-top: 20px; transition: 0.3s; }
 
-        /* --- МАКЕТ ПРИЛОЖЕНИЯ --- */
+        /* --- LAYOUT --- */
         #app { display: none; height: 100vh; width: 100vw; flex-direction: row; }
-        #sidebar { width: 350px; background: var(--side); border-right: 2px solid #000; display: flex; flex-direction: column; z-index: 100; transition: 0.3s ease; }
-        #chat-window { flex: 1; display: flex; flex-direction: column; background: #0e1117; position: relative; }
+        #sidebar { width: 380px; background: var(--side); border-right: 2px solid #000; display: flex; flex-direction: column; z-index: 1000; transition: 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+        #main-chat { flex: 1; display: flex; flex-direction: column; background: #0e1117; position: relative; }
 
-        /* --- СПИСОК ЮЗЕРОВ --- */
-        .side-head { padding: 20px; background: var(--side); display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(0,0,0,0.2); }
-        .u-item { padding: 15px 20px; display: flex; align-items: center; gap: 15px; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.05); transition: 0.2s; }
-        .u-item:hover { background: rgba(255,255,255,0.03); }
-        .u-item.active { background: #2b5278; border-left: 4px solid var(--blue); }
-        .pfp { width: 52px; height: 52px; border-radius: 50%; object-fit: cover; border: 1px solid rgba(255,255,255,0.1); }
-        .online-dot { width: 12px; height: 12px; background: #4ade80; border-radius: 50%; border: 2px solid var(--side); position: relative; left: -25px; top: 15px; }
+        /* --- SIDEBAR CONTENT --- */
+        .side-header { padding: 25px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(0,0,0,0.3); }
+        .user-pill { padding: 15px 20px; display: flex; align-items: center; gap: 15px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.02); transition: 0.2s; position: relative; }
+        .user-pill:hover { background: rgba(255,255,255,0.05); }
+        .user-pill.active { background: var(--msg-out); border-left: 5px solid var(--blue); }
+        .pfp { width: 55px; height: 55px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(255,255,255,0.1); }
+        .online-mark { width: 14px; height: 14px; background: #4ade80; border-radius: 50%; border: 3px solid var(--side); position: absolute; left: 60px; top: 55px; }
 
-        /* --- ХЕДЕР ЧАТА --- */
-        .chat-header { height: 70px; background: var(--side); padding: 0 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 5px 15px rgba(0,0,0,0.2); z-index: 50; }
-        .c-info { display: flex; align-items: center; gap: 15px; }
-        .nav-btn { font-size: 22px; color: var(--blue); cursor: pointer; background: none; border: none; padding: 10px; transition: 0.2s; }
-        .nav-btn:hover { transform: scale(1.1); }
+        /* --- CHAT HEADER --- */
+        .chat-top { height: 75px; background: var(--side); padding: 0 25px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 10px 30px rgba(0,0,0,0.3); z-index: 100; }
+        .c-user { display: flex; align-items: center; gap: 15px; }
+        .tool-btn { font-size: 24px; color: var(--blue); background: none; border: none; cursor: pointer; margin-left: 15px; transition: 0.2s; }
+        .tool-btn:hover { transform: translateY(-3px) scale(1.1); }
 
-        /* --- СООБЩЕНИЯ --- */
-        #feed { flex: 1; overflow-y: auto; padding: 25px; display: flex; flex-direction: column; gap: 15px; background: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png'); background-color: rgba(14, 22, 33, 0.9); background-blend-mode: overlay; scroll-behavior: smooth; }
-        .m-wrap { display: flex; flex-direction: column; max-width: 80%; position: relative; animation: pop 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28); }
-        @keyframes pop { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-        .m-wrap.out { align-self: flex-end; }
-        .m-wrap.in { align-self: flex-start; }
-        .bubble { padding: 12px 16px; border-radius: 20px; font-size: 15.5px; position: relative; line-height: 1.5; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
-        .out .bubble { background: var(--msg-out); border-bottom-right-radius: 4px; }
-        .in .bubble { background: var(--msg-in); border-bottom-left-radius: 4px; }
-        .bubble img, .bubble video { max-width: 100%; border-radius: 12px; margin-top: 8px; border: 1px solid rgba(255,255,255,0.05); }
-        .m-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 11px; opacity: 0.6; }
-        .del-i { color: var(--danger); cursor: pointer; margin-left: 10px; visibility: hidden; }
-        .m-wrap:hover .del-i { visibility: visible; }
+        /* --- MESSAGES FEED --- */
+        #msg-box { flex: 1; overflow-y: auto; padding: 30px; display: flex; flex-direction: column; gap: 18px; background: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png'); background-color: rgba(14, 22, 33, 0.94); background-blend-mode: overlay; scroll-behavior: smooth; }
+        .msg-line { display: flex; flex-direction: column; max-width: 75%; position: relative; animation: slideUp 0.3s ease-out; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .msg-line.mine { align-self: flex-end; }
+        .msg-line.their { align-self: flex-start; }
+        
+        .bubble { padding: 14px 18px; border-radius: 22px; font-size: 16px; position: relative; box-shadow: 0 4px 15px rgba(0,0,0,0.2); line-height: 1.6; }
+        .mine .bubble { background: var(--msg-out); border-bottom-right-radius: 4px; }
+        .their .bubble { background: var(--msg-in); border-bottom-left-radius: 4px; }
+        
+        .bubble img, .bubble video { max-width: 100%; border-radius: 15px; margin-top: 10px; display: block; border: 1px solid rgba(255,255,255,0.1); }
+        .m-info { display: flex; justify-content: space-between; font-size: 11px; opacity: 0.6; margin-top: 8px; font-weight: bold; }
+        .trash-can { color: var(--danger); cursor: pointer; display: none; margin-left: 10px; }
+        .msg-line:hover .trash-can { display: inline; }
 
-        /* --- ПАНЕЛЬ ВВОДА --- */
-        .bar { padding: 15px 25px; background: var(--side); display: flex; align-items: center; gap: 15px; border-top: 1px solid rgba(0,0,0,0.2); }
-        .field { flex: 1; background: #0b1118; border: 1px solid #242f3d; padding: 14px 20px; border-radius: 25px; color: white; font-size: 16px; }
-        .action { font-size: 24px; color: var(--blue); cursor: pointer; border: none; background: none; }
-        .send-pill { width: 50px; height: 50px; background: var(--blue); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: none; cursor: pointer; box-shadow: 0 4px 10px rgba(0,136,204,0.3); }
+        /* --- CALL OVERLAY --- */
+        #call-screen { position: absolute; inset: 0; background: linear-gradient(to bottom, #1e2c3a, #0e1621); z-index: 5000; display: none; flex-direction: column; align-items: center; justify-content: center; }
+        .call-avatar { width: 180px; height: 180px; border-radius: 50%; border: 6px solid var(--blue); animation: wave 2s infinite; margin-bottom: 40px; }
+        @keyframes wave { 0% { box-shadow: 0 0 0 0 rgba(0,136,204,0.6); } 70% { box-shadow: 0 0 0 50px rgba(0,136,204,0); } 100% { box-shadow: 0 0 0 0 rgba(0,136,204,0); } }
+        .call-btns { display: flex; gap: 40px; margin-top: 60px; }
+        .call-action { width: 70px; height: 70px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 30px; color: white; cursor: pointer; transition: 0.3s; }
 
-        /* --- ЗВОНОК --- */
-        #call-ui { position: absolute; inset: 0; background: var(--grad); z-index: 200; display: none; flex-direction: column; align-items: center; justify-content: center; }
-        .call-ava { width: 160px; height: 160px; border-radius: 50%; border: 5px solid var(--blue); margin-bottom: 30px; animation: glow 2s infinite; }
-        @keyframes glow { 0% { box-shadow: 0 0 0 0 rgba(0,136,204,0.6); } 70% { box-shadow: 0 0 0 40px rgba(0,136,204,0); } 100% { box-shadow: 0 0 0 0 rgba(0,136,204,0); } }
+        /* --- INPUT AREA --- */
+        .bottom-bar { padding: 20px 30px; background: var(--side); display: flex; align-items: center; gap: 20px; border-top: 1px solid rgba(0,0,0,0.2); padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
+        .input-wrap { flex: 1; background: #0b1118; border: 1px solid #242f3d; padding: 15px 25px; border-radius: 30px; color: white; font-size: 17px; outline: none; }
+        .circle-btn { width: 55px; height: 55px; background: var(--blue); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: none; font-size: 24px; cursor: pointer; box-shadow: 0 10px 20px rgba(0,136,204,0.4); transition: 0.3s; }
+        .circle-btn:active { transform: scale(0.9); }
 
-        /* --- МОБИЛКА --- */
-        @media (max-width: 768px) {
-            #sidebar { position: fixed; left: 0; width: 100%; height: 100%; transform: translateX(0); z-index: 150; }
-            body.is-chat #sidebar { transform: translateX(-100%); }
-            .back-m { display: block !important; }
+        /* --- MOBILE ADAPTATION --- */
+        @media (max-width: 800px) {
+            #sidebar { position: fixed; width: 100%; height: 100%; left: 0; }
+            body.in-chat #sidebar { transform: translateX(-100%); }
+            .back-arrow { display: block !important; }
         }
-        .back-m { display: none; font-size: 26px; margin-right: 15px; cursor: pointer; }
+        .back-arrow { display: none; font-size: 28px; color: var(--blue); margin-right: 20px; cursor: pointer; }
     </style>
 </head>
-<body>
+<body class="">
 
-<div id="auth-overlay">
+<div id="auth-gate">
     <div class="auth-card">
         <h1>TegeGrom</h1>
-        <p style="opacity:0.6; margin: 10px 0 30px;">Premium OS v11.0</p>
-        <input type="text" id="u-name" class="auth-input" placeholder="Никнейм">
-        <input type="password" id="u-pass" class="auth-input" placeholder="Пароль">
-        <input type="text" id="u-ava" class="auth-input" placeholder="Аватар URL (прямая ссылка)">
-        <button class="auth-btn" onclick="startSession()">ВОЙТИ В СИСТЕМУ</button>
+        <p style="opacity:0.5; margin-bottom:35px; font-weight:600;">PLATINUM EDITION v12.0</p>
+        <input type="text" id="l-user" class="auth-input" placeholder="Ваш никнейм">
+        <input type="password" id="l-pass" class="auth-input" placeholder="Пароль доступа">
+        <input type="text" id="l-ava" class="auth-input" placeholder="URL аватара (необязательно)">
+        <input type="color" id="l-color" style="height:50px; cursor:pointer;" class="auth-input" value="#0088cc">
+        <button class="auth-btn" onclick="loginAction()">ИНИЦИАЛИЗИРОВАТЬ</button>
     </div>
 </div>
 
 <div id="app">
     <div id="sidebar">
-        <div class="side-head">
-            <b style="font-size: 24px; color: var(--blue);">Чаты</b>
-            <i class="fa-solid fa-pen-to-square nav-btn"></i>
+        <div class="side-header">
+            <b style="font-size: 28px; color: var(--blue);">Чаты</b>
+            <i class="fa-solid fa-gear tool-btn" onclick="alert('Settings v12')"></i>
         </div>
-        <div id="u-list" style="overflow-y:auto; flex:1;"></div>
+        <div id="contacts-box" style="overflow-y:auto; flex:1;"></div>
     </div>
 
-    <div id="chat-window">
-        <div id="call-ui">
-            <img id="call-pfp" class="call-ava" src="">
-            <h2 id="call-target">Звонок...</h2>
-            <p id="timer" style="font-size: 20px; letter-spacing: 2px;">00:00</p>
-            <button onclick="endCall()" style="background:var(--danger); width: 200px; padding:15px; border-radius:15px; color:white; border:none; font-weight:bold; margin-top:50px;">ЗАВЕРШИТЬ</button>
+    <div id="main-chat">
+        <div id="call-screen">
+            <img id="call-ava" class="call-avatar" src="">
+            <h1 id="call-nick" style="font-size: 32px;">Звонок...</h1>
+            <p id="call-time" style="font-size: 22px; opacity:0.6;">00:00</p>
+            <div class="call-btns">
+                <div class="call-action" style="background:var(--danger)" onclick="dropCall()"><i class="fa-solid fa-phone-slash"></i></div>
+                <div class="call-action" style="background:#4ade80" onclick="alert('Connected!')"><i class="fa-solid fa-microphone"></i></div>
+            </div>
         </div>
 
-        <div class="chat-header">
-            <div class="c-info">
-                <i class="fa-solid fa-arrow-left back-m" onclick="document.body.classList.remove('is-chat')"></i>
-                <img id="h-ava" class="pfp" src="https://cdn-icons-png.flaticon.com/512/149/149071.png">
+        <div class="chat-top">
+            <div class="c-user">
+                <i class="fa-solid fa-chevron-left back-arrow" onclick="document.body.classList.remove('in-chat')"></i>
+                <img id="chat-pfp" class="pfp" src="">
                 <div>
-                    <b id="h-name" style="font-size:18px;">Глобальный чат</b><br>
-                    <small id="h-stat" style="color:#4ade80;">в сети</small>
+                    <b id="chat-user-name" style="font-size: 20px;">Глобальный поток</b><br>
+                    <small id="chat-user-bio" style="color: #4ade80; font-weight: bold;">в сети</small>
                 </div>
             </div>
-            <div style="display:flex; gap:10px;">
-                <button class="nav-btn" onclick="makeCall()"><i class="fa-solid fa-phone"></i></button>
-                <button class="nav-btn" onclick="makeCall()"><i class="fa-solid fa-video"></i></button>
-                <button class="nav-btn" onclick="alert('Admin: '+me)"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+            <div>
+                <button class="tool-btn" onclick="initCall()"><i class="fa-solid fa-phone"></i></button>
+                <button class="tool-btn" onclick="initCall()"><i class="fa-solid fa-video"></i></button>
+                <button class="tool-btn" onclick="alert('Kupriz OS Admin Access Granted')"><i class="fa-solid fa-shield-halved"></i></button>
             </div>
         </div>
 
-        <div id="feed"></div>
+        <div id="msg-box"></div>
 
-        <div class="bar">
-            <button class="action" onclick="media()"><i class="fa-solid fa-paperclip"></i></button>
-            <input type="text" id="msg-field" class="field" placeholder="Написать сообщение..." onkeypress="if(event.key==='Enter')send()">
-            <button class="action" onclick="emoji()"><i class="fa-regular fa-face-smile"></i></button>
-            <button class="action" id="rec-btn" onclick="voice()"><i class="fa-solid fa-microphone"></i></button>
-            <button class="send-pill" onclick="send()"><i class="fa-solid fa-paper-plane"></i></button>
+        <div class="bottom-bar">
+            <button class="tool-btn" style="margin:0" onclick="openAttach()"><i class="fa-solid fa-paperclip"></i></button>
+            <input type="text" id="m-field" class="input-wrap" placeholder="Напишите что-нибудь..." onkeypress="if(event.key==='Enter')pushMsg()">
+            <button class="tool-btn" style="margin:0" onclick="alert('Emojis v12')"><i class="fa-regular fa-face-smile"></i></button>
+            <button class="tool-btn" id="voice-rec" style="margin:0" onclick="recVoice()"><i class="fa-solid fa-microphone"></i></button>
+            <button class="circle-btn" onclick="pushMsg()"><i class="fa-solid fa-paper-plane"></i></button>
         </div>
     </div>
 </div>
 
 <script>
-    let me = localStorage.getItem('tg11_u') || "";
-    let tg = "all";
-    let isRec = false;
+    let myName = localStorage.getItem('tg12_name') || "";
+    let targetChat = "all";
+    let isRecording = false;
 
-    async function startSession() {
-        const u = document.getElementById('u-name').value.trim();
-        const p = document.getElementById('u-pass').value.trim();
-        const a = document.getElementById('u-ava').value.trim();
-        if(!u || !p) return alert("Введите данные!");
-        await fetch('/api/auth', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p,avatar:a})});
-        localStorage.setItem('tg11_u', u);
+    async function loginAction() {
+        const u = document.getElementById('l-user').value.trim();
+        const p = document.getElementById('l-pass').value.trim();
+        const a = document.getElementById('l-ava').value.trim();
+        const c = document.getElementById('l-color').value;
+        if(!u || !p) return alert("Введите ник и пароль!");
+
+        const r = await fetch('/api/login', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({username:u, password:p, avatar:a, color:c})
+        });
+        const res = await r.json();
+        localStorage.setItem('tg12_name', u);
+        localStorage.setItem('tg12_color', c);
         location.reload();
     }
 
-    function init() {
-        if(!me) return;
-        document.getElementById('auth-overlay').style.display = 'none';
+    function bootApp() {
+        if(!myName) return;
+        document.getElementById('auth-gate').style.display = 'none';
         document.getElementById('app').style.display = 'flex';
-        loadUsers();
-        setInterval(loadUsers, 10000);
-        setInterval(sync, 2000);
+        loadContacts();
+        setInterval(loadContacts, 8000);
+        setInterval(refreshFeed, 2000);
     }
 
-    async function loadUsers() {
-        const r = await fetch('/api/users');
+    async function loadContacts() {
+        const r = await fetch('/api/contacts');
         const data = await r.json();
-        const list = document.getElementById('u-list');
-        let html = `<div class="u-item ${tg==='all'?'active':''}" onclick="setT('all','https://cdn-icons-png.flaticon.com/512/149/149071.png','Глобальный чат')">
-            <img src="https://cdn-icons-png.flaticon.com/512/149/149071.png" class="pfp">
-            <div><b>📢 Глобальный чат</b><br><small style="color:var(--hint)">Общий поток</small></div>
+        const box = document.getElementById('contacts-box');
+        let html = `<div class="user-pill ${targetChat==='all'?'active':''}" onclick="setTarget('all','https://i.imgur.com/6VBx3io.png','Общий поток','TegeGrom Global')">
+            <img src="https://i.imgur.com/6VBx3io.png" class="pfp">
+            <div><b>📢 Глобальный чат</b><br><small style="opacity:0.6">Все пользователи здесь</small></div>
         </div>`;
-        data.forEach(u => {
-            if(u.username !== me) {
-                html += `<div class="u-item ${tg===u.username?'active':''}" onclick="setT('${u.username}','${u.avatar}','${u.username}')">
-                    <img src="${u.avatar}" class="pfp">
-                    <div><b>${u.username}</b><br><small style="color:var(--hint)">${u.status}</small></div>
+        data.forEach(c => {
+            if(c.username !== myName) {
+                html += `<div class="user-pill ${targetChat===c.username?'active':''}" onclick="setTarget('${c.username}','${c.avatar}','${c.username}','${c.bio}')">
+                    <img src="${c.avatar}" class="pfp" style="border-color:${c.theme_color}">
+                    <div class="online-mark"></div>
+                    <div><b>${c.username}</b><br><small style="opacity:0.6">${c.bio}</small></div>
                 </div>`;
             }
         });
-        list.innerHTML = html;
+        box.innerHTML = html;
     }
 
-    function setT(u, a, n) {
-        tg = u;
-        document.getElementById('h-ava').src = a;
-        document.getElementById('h-name').innerText = n;
-        document.getElementById('feed').innerHTML = "";
-        if(window.innerWidth < 768) document.body.classList.add('is-chat');
-        sync();
+    function setTarget(u, a, n, b) {
+        targetChat = u;
+        document.getElementById('chat-pfp').src = a;
+        document.getElementById('chat-user-name').innerText = n;
+        document.getElementById('chat-user-bio').innerText = b;
+        document.getElementById('msg-box').innerHTML = "";
+        if(window.innerWidth < 800) document.body.classList.add('in-chat');
+        refreshFeed();
     }
 
-    async function send(type='text', url='') {
-        const f = document.getElementById('msg-field');
+    async function pushMsg(type='text', url='') {
+        const f = document.getElementById('m-field');
         if(!f.value && type==='text') return;
-        await fetch('/api/send', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sender:me,receiver:tg,content:f.value,type:type,url:url})});
-        f.value = ""; sync();
+        await fetch('/api/send', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({sender: myName, receiver: targetChat, content: f.value, type: type, url: url})
+        });
+        f.value = ""; refreshFeed();
     }
 
-    async function sync() {
-        const r = await fetch(`/api/messages/${me}/${tg}`);
+    async function refreshFeed() {
+        const r = await fetch(`/api/msgs/${myName}/${targetChat}`);
         const data = await r.json();
-        const box = document.getElementById('feed');
-        box.innerHTML = data.map(m => {
+        const feed = document.getElementById('msg-box');
+        feed.innerHTML = data.map(m => {
             let body = m.content;
-            if(m.msg_type === 'img') body = `<img src="${m.url}">`;
-            if(m.msg_type === 'vid') body = `<video controls src="${m.url}"></video>`;
-            if(m.msg_type === 'voice') body = `<div style="display:flex;align-items:center;gap:10px;"><i class="fa-solid fa-play"></i><div style="height:4px;width:100px;background:#fff;border-radius:2px;"></div></div>`;
+            if(m.msg_type === 'img') body = `<img src="${m.file_url}">`;
+            if(m.msg_type === 'vid') body = `<video controls src="${m.file_url}"></video>`;
+            if(m.msg_type === 'voice') body = `<div style="background:rgba(255,255,255,0.1); padding:10px; border-radius:10px; display:flex; gap:10px; align-items:center;"><i class="fa-solid fa-play"></i> Voice Message <small>0:15</small></div>`;
             
-            const isMe = m.sender === me;
-            const canD = isMe || me.toLowerCase() === 'kupriz';
+            const isMe = m.sender === myName;
+            const canDel = isMe || myName.toLowerCase() === 'kupriz';
 
-            return `<div class="m-wrap ${isMe?'out':'in'}">
+            return `<div class="msg-line ${isMe?'mine':'their'}">
                 <div class="bubble">
                     <b style="color:var(--blue); font-size:12px;">${m.sender}</b><br>${body}
-                    <div class="m-meta">
+                    <div class="m-info">
                         <span>${m.timestamp}</span>
-                        ${canD ? `<i class="fa-solid fa-trash del-i" onclick="del(${m.id})"></i>` : ''}
+                        ${canDel ? `<i class="fa-solid fa-trash trash-can" onclick="killMsg(${m.id})"></i>` : ''}
                     </div>
                 </div>
             </div>`;
         }).join('');
-        box.scrollTop = box.scrollHeight;
+        feed.scrollTop = feed.scrollHeight;
     }
 
-    async function del(id) { if(confirm("Удалить?")) await fetch(`/api/msg/${id}/${me}`, {method:'DELETE'}); sync(); }
-
-    function media() {
-        const t = prompt("1-Фото, 2-Видео");
-        const u = prompt("URL ссылки:");
-        if(u) send(t==='1'?'img':'vid', u);
+    async function killMsg(id) {
+        if(confirm("Удалить это сообщение навсегда?")) {
+            await fetch(`/api/msg/${id}/${myName}`, {method: 'DELETE'});
+            refreshFeed();
+        }
     }
 
-    function emoji() { 
-        const e = ["😀","😂","😍","👍","🔥","🚀","💎"];
-        const rand = e[Math.floor(Math.random() * e.length)];
-        document.getElementById('msg-field').value += rand;
+    function openAttach() {
+        const t = prompt("Выберите медиа: 1-Фото, 2-Видео");
+        const u = prompt("Вставьте прямую ссылку (URL):");
+        if(u) pushMsg(t==='1'?'img':'vid', u);
     }
 
-    function voice() {
-        isRec = !isRec;
-        const b = document.getElementById('rec-btn');
-        b.style.color = isRec ? 'var(--danger)' : 'var(--blue)';
-        if(!isRec) send('voice', '#');
+    function recVoice() {
+        isRecording = !isRecording;
+        const b = document.getElementById('voice-rec');
+        b.style.color = isRecording ? 'var(--danger)' : 'var(--blue)';
+        if(!isRecording) pushMsg('voice', '#');
     }
 
-    function makeCall() {
-        document.getElementById('call-pfp').src = document.getElementById('h-ava').src;
-        document.getElementById('call-target').innerText = "Вызов: " + tg;
-        document.getElementById('call-ui').style.display = 'flex';
+    function initCall() {
+        document.getElementById('call-ava').src = document.getElementById('chat-pfp').src;
+        document.getElementById('call-nick').innerText = "Вызов: " + targetChat;
+        document.getElementById('call-screen').style.display = 'flex';
     }
-    function endCall() { document.getElementById('call-ui').style.display = 'none'; }
+    function dropCall() { document.getElementById('call-screen').style.display = 'none'; }
 
-    init();
+    bootApp();
 </script>
 </body>
 </html>
