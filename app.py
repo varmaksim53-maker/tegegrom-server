@@ -1,30 +1,30 @@
 import sqlite3, uvicorn, hashlib, base64, os
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from datetime import datetime
 
 app = FastAPI()
-# База данных с "выживающим" названием
-DB = 'tegegrom_ultra_v26_final_core.db'
+DB = 'tegegrom_v28_final.db'
 
-# --- СЕРВЕРНАЯ ЛОГИКА И БД ---
+# --- Инициализация БД (все как на GitHub) ---
 def init_db():
     with sqlite3.connect(DB) as conn:
-        # Индексы ускоряют поиск, когда база разрастется до тысяч строк
         conn.execute('''CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE,
-            password TEXT)''')
+            username TEXT UNIQUE, password TEXT)''')
         conn.execute('''CREATE TABLE IF NOT EXISTS messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT, 
             sender TEXT, receiver TEXT, content TEXT, 
             timestamp TEXT, type TEXT DEFAULT 'text', file TEXT DEFAULT '')''')
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_receiver ON messages(receiver)")
         conn.commit()
 
 init_db()
 
 def hash_pass(p): return hashlib.sha256(p.encode()).hexdigest()
+
+@app.get("/sw.js", response_class=PlainTextResponse)
+async def get_sw():
+    return "self.addEventListener('push', function(e) { console.log('Push Rec'); });"
 
 @app.get("/", response_class=HTMLResponse)
 async def index(): return UI
@@ -41,24 +41,23 @@ async def auth(d: dict):
         else:
             conn.execute("INSERT INTO users (username, password) VALUES (?,?)", (u, p))
             conn.commit()
-            return {"ok": True, "user": u, "msg": "Аккаунт создан"}
+            return {"ok": True, "user": u}
 
 @app.get("/api/get_users")
 async def get_users():
     with sqlite3.connect(DB) as conn:
         conn.row_factory = sqlite3.Row
-        res = conn.execute("SELECT username FROM users").fetchall()
-        return [r['username'] for r in res]
+        return [r['username'] for r in conn.execute("SELECT username FROM users").fetchall()]
 
 @app.get("/api/get/{me}/{to}")
 async def get_msgs(me: str, to: str, last: int = 0):
     with sqlite3.connect(DB) as conn:
         conn.row_factory = sqlite3.Row
         if to == "all":
-            q = "SELECT * FROM messages WHERE receiver='all' AND id > ? ORDER BY id ASC LIMIT 100"
+            q = "SELECT * FROM messages WHERE receiver='all' AND id > ? ORDER BY id ASC"
             params = (last,)
         else:
-            q = "SELECT * FROM messages WHERE ((sender=? AND receiver=?) OR (sender=? AND receiver=?)) AND id > ? ORDER BY id ASC LIMIT 100"
+            q = "SELECT * FROM messages WHERE ((sender=? AND receiver=?) OR (sender=? AND receiver=?)) AND id > ? ORDER BY id ASC"
             params = (me, to, to, me, last)
         return [dict(r) for r in conn.execute(q, params).fetchall()]
 
@@ -71,132 +70,104 @@ async def send_msg(d: dict):
         conn.commit()
     return {"ok": True}
 
-# --- ИНТЕРФЕЙС TegeGrom Ultra ---
 UI = """
 <!DOCTYPE html>
-<html lang="ru">
+<html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
-    <title>TegeGrom Ultra V26</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=0">
+    <title>Tegegrom</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        :root { --bg: #0e1621; --side: #17212b; --blue: #0088cc; --txt: #f5f5f5; --in: #182533; --out: #2b5278; --accent: #2481cc; }
-        * { box-sizing: border-box; font-family: -apple-system, system-ui, sans-serif; -webkit-tap-highlight-color: transparent; outline: none; }
-        body { margin: 0; background: var(--bg); color: var(--txt); height: 100vh; display: flex; overflow: hidden; position: fixed; width: 100%; }
+        :root { --bg: #0e1621; --side: #17212b; --blue: #0088cc; --txt: #f5f5f5; --in: #182533; --out: #2b5278; }
+        * { box-sizing: border-box; font-family: -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; }
+        body { margin: 0; background: var(--bg); color: var(--txt); height: 100vh; display: flex; overflow: hidden; width: 100vw; }
         
-        /* Экран авторизации */
-        #auth { position: fixed; inset: 0; z-index: 9999; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 20px; }
-        .auth-box { background: var(--side); padding: 35px; border-radius: 30px; text-align: center; width: 100%; max-width: 400px; box-shadow: 0 20px 60px rgba(0,0,0,0.7); }
-        .auth-box input { width: 100%; padding: 16px; margin: 10px 0; border-radius: 15px; border: 1px solid #242f3d; background: #0b1118; color: white; font-size: 16px; }
-        .auth-box button { width: 100%; padding: 16px; background: var(--blue); border: none; color: white; border-radius: 15px; font-weight: bold; font-size: 17px; cursor: pointer; margin-top: 10px; }
-
-        /* Список чатов */
-        #side { width: 320px; background: var(--side); border-right: 1px solid #000; display: flex; flex-direction: column; z-index: 500; transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
-        .side-head { padding: 30px 20px 20px; font-weight: bold; font-size: 26px; color: var(--blue); }
-        .chat-item { padding: 15px 20px; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.1); display: flex; align-items: center; gap: 15px; transition: 0.2s; }
+        #auth { position: fixed; inset: 0; z-index: 9999; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 15px; }
+        .auth-box { background: var(--side); padding: 25px; border-radius: 20px; text-align: center; width: 100%; max-width: 320px; }
+        .auth-box input { width: 100%; padding: 12px; margin: 8px 0; border-radius: 10px; border: 1px solid #242f3d; background: #0b1118; color: white; outline: none; }
+        
+        #side { width: 300px; background: var(--side); border-right: 1px solid #000; display: flex; flex-direction: column; z-index: 500; transition: 0.3s ease; }
+        .chat-item { padding: 14px; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.1); display: flex; align-items: center; gap: 10px; }
         .chat-item.active { background: var(--out); }
-        .ava { width: 52px; height: 52px; background: var(--blue); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 22px; color: #fff; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+        .ava { width: 42px; height: 42px; background: var(--blue); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
 
-        /* Чат */
-        #main { flex: 1; display: flex; flex-direction: column; background: #0e1117; position: relative; }
-        .main-head { padding: 15px 20px; background: var(--side); display: flex; align-items: center; border-bottom: 1px solid rgba(0,0,0,0.3); z-index: 400; min-height: 70px; }
+        #main { flex: 1; display: flex; flex-direction: column; background: #0e1117; position: relative; width: 100%; }
+        #feed { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; padding-bottom: 160px; scroll-behavior: smooth; }
         
-        #feed { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; padding-bottom: 220px; scroll-behavior: smooth; }
-        
-        /* Сообщения */
-        .msg { max-width: 85%; padding: 12px 18px; border-radius: 20px; font-size: 16px; line-height: 1.4; position: relative; animation: msgFade 0.3s ease; }
-        @keyframes msgFade { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        
+        .msg { max-width: 85%; padding: 10px 14px; border-radius: 18px; font-size: 15px; line-height: 1.4; position: relative; }
         .msg.out { align-self: flex-end; background: var(--out); border-bottom-right-radius: 4px; }
         .msg.in { align-self: flex-start; background: var(--in); border-bottom-left-radius: 4px; }
-        .msg-sender { font-size: 11px; font-weight: bold; color: var(--blue); margin-bottom: 4px; display: block; }
-        .time { font-size: 10px; opacity: 0.5; text-align: right; margin-top: 5px; }
-
-        /* ПАНЕЛЬ ВВОДА - ФИКС ДЛЯ ТЕЛЕФОНОВ */
+        
+        /* ПАНЕЛЬ ВВОДА - ФИКС ДЛЯ iPHONE 5 */
         .bar { 
-            padding: 15px 20px; 
-            background: var(--side); 
-            display: none; 
-            align-items: center; 
-            gap: 15px; 
-            padding-bottom: calc(75px + env(safe-area-inset-bottom)); 
-            border-top: 1px solid rgba(255,255,255,0.05);
-            position: absolute; bottom: 0; left: 0; right: 0;
-            z-index: 1000;
-            box-shadow: 0 -10px 30px rgba(0,0,0,0.5);
+            padding: 10px 12px; background: var(--side); display: none; align-items: center; gap: 8px; 
+            padding-bottom: calc(50px + env(safe-area-inset-bottom)); 
+            border-top: 1px solid rgba(255,255,255,0.05); position: absolute; bottom: 0; left: 0; right: 0; z-index: 1000;
         }
-        .inp { flex: 1; background: #0b1118; border: none; padding: 14px 20px; color: white; border-radius: 30px; font-size: 16px; }
-        .icon { color: var(--blue); font-size: 28px; cursor: pointer; transition: 0.2s; }
-        .icon:active { transform: scale(0.8); }
-        .mic-rec { color: #ff4d4d !important; animation: blink 1s infinite; }
-        @keyframes blink { 50% { opacity: 0.3; } }
+        .inp { flex: 1; background: #0b1118; border: none; padding: 10px 15px; color: white; border-radius: 20px; font-size: 16px; min-width: 0; }
+        .icon { color: var(--blue); font-size: 24px; cursor: pointer; flex-shrink: 0; }
+        .rec-active { color: #ff5f5f !important; animation: pulse 1s infinite; }
+        @keyframes pulse { 50% { opacity: 0.5; } }
 
-        @media (max-width: 750px) {
+        @media (max-width: 700px) {
             #side { position: absolute; width: 100%; height: 100%; left: 0; }
             body.chatting #side { transform: translateX(-100%); }
-            .back-btn { display: block !important; }
+            .back { display: block !important; }
         }
-        .back-btn { display: none; margin-right: 15px; font-size: 24px; color: var(--blue); }
+        .back { display: none; margin-right: 10px; cursor: pointer; font-size: 22px; color: var(--blue); }
     </style>
 </head>
 <body>
 
 <div id="auth">
     <div class="auth-box">
-        <h2 style="color:var(--blue); margin-bottom:10px;">TegeGrom Ultra</h2>
-        <p style="opacity:0.6; margin-bottom:20px;">Вход или Регистрация</p>
-        <input type="text" id="a-user" placeholder="Ваш никнейм" autocomplete="off">
+        <h3 style="color:var(--blue); margin-bottom:15px;">TegeGrom</h3>
+        <input type="text" id="a-user" placeholder="Логин">
         <input type="password" id="a-pass" placeholder="Пароль">
-        <button onclick="doAuth()">ВОЙТИ В АККАУНТ</button>
-        <p id="auth-err" style="color:#ff5f5f; margin-top:15px; font-size:14px;"></p>
+        <button onclick="doAuth()" style="width:100%; padding:12px; background:var(--blue); border:none; color:white; border-radius:10px; font-weight:bold; cursor:pointer;">ВОЙТИ</button>
+        <p id="auth-err" style="color:#ff5f5f; font-size:12px;"></p>
     </div>
 </div>
 
 <div id="side">
-    <div class="side-head">TegeGrom</div>
+    <div style="padding:20px 15px; font-weight:bold; font-size:20px;">Чаты</div>
     <div class="chat-item" id="btn-all" onclick="selectChat('all')">
-        <div class="ava" style="background: linear-gradient(45deg, #0088cc, #00c6ff);"><i class="fa-solid fa-earth-americas"></i></div>
-        <div style="flex:1">
-            <div style="font-weight:bold">Общий чат</div>
-            <div style="font-size:12px; opacity:0.5">Все пользователи здесь</div>
-        </div>
+        <div class="ava" style="background:#0088cc">📢</div> <b>Общий чат</b>
     </div>
     <div id="contacts-list" style="overflow-y:auto; flex:1;"></div>
 </div>
 
 <div id="main">
-    <div class="main-head">
-        <i class="fa-solid fa-chevron-left back-btn" onclick="closeChat()"></i>
-        <div class="ava" id="h-ava" style="width:40px; height:40px; font-size:16px; margin-right:12px;">📢</div>
-        <b id="h-title" style="font-size:19px;">Выберите чат</b>
+    <div style="padding:12px 15px; background:var(--side); display:flex; align-items:center; min-height:55px;">
+        <i class="fa-solid fa-chevron-left back" onclick="closeChat()"></i>
+        <b id="h-title" style="font-size:17px;">TegeGrom</b>
     </div>
     <div id="feed"></div>
     <div class="bar" id="input-bar">
         <label class="icon"><i class="fa-solid fa-paperclip"></i><input type="file" id="f-in" hidden onchange="upFile()"></label>
-        <input type="text" id="m-in" class="inp" placeholder="Написать..." onkeypress="if(event.key==='Enter')send('text')">
+        <input type="text" id="m-in" class="inp" placeholder="Текст..." onkeypress="if(event.key==='Enter')send('text')">
         <i class="fa-solid fa-microphone icon" id="mic" onclick="toggleMic()"></i>
-        <i class="fa-solid fa-circle-arrow-up icon" style="font-size:35px" onclick="send('text')"></i>
+        <i class="fa-solid fa-paper-plane icon" onclick="send('text')"></i>
     </div>
 </div>
 
-<audio id="snd_in" src="https://raw.githubusercontent.com/Anonym761/archive/main/msg.mp3" preload="auto"></audio>
+<audio id="snd" src="https://raw.githubusercontent.com/Anonym761/archive/main/msg.mp3"></audio>
 
 <script>
-    let myName = localStorage.getItem('tg_v26_u') || "";
+    let myName = localStorage.getItem('tg_v28_u') || "";
     let target = "";
     let lastId = 0;
-    let rec;
+    let mediaRec;
     let chunks = [];
 
-    // Принудительная регистрация Service Worker для пушей (заглушка для стабильности)
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('data:text/javascript;base64,')
-        .catch(() => {});
+        navigator.serviceWorker.register('/sw.js');
     }
 
     if(myName) { 
         document.getElementById('auth').style.display='none'; 
+        if (Notification.permission !== "granted") Notification.requestPermission();
         startApp(); 
     }
 
@@ -207,7 +178,7 @@ UI = """
         const r = await fetch('/api/auth', {method:'POST', body:JSON.stringify({u, p}), headers:{'Content-Type':'application/json'}});
         const res = await r.json();
         if(res.ok) { 
-            localStorage.setItem('tg_v26_u', res.user); 
+            localStorage.setItem('tg_v28_u', res.user); 
             Notification.requestPermission();
             location.reload(); 
         } else { document.getElementById('auth-err').innerText = res.msg; }
@@ -217,19 +188,14 @@ UI = """
         setInterval(sync, 1500);
         setInterval(loadUsers, 5000);
         loadUsers();
-        // Разрешаем аудио заранее
-        navigator.mediaDevices.getUserMedia({ audio: true }).catch(()=>{});
     }
 
     function selectChat(t) {
         target = t; lastId = 0;
         document.getElementById('h-title').innerText = t === 'all' ? 'Общий чат' : t;
-        document.getElementById('h-ava').innerText = t === 'all' ? '📢' : t[0].toUpperCase();
         document.getElementById('feed').innerHTML = '';
         document.getElementById('input-bar').style.display = 'flex';
         document.body.classList.add('chatting');
-        document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
-        if(t==='all') document.getElementById('btn-all').classList.add('active');
         sync();
     }
 
@@ -245,11 +211,7 @@ UI = """
         const list = document.getElementById('contacts-list');
         list.innerHTML = users.filter(u => u !== myName).map(u => `
             <div class="chat-item ${target===u?'active':''}" onclick="selectChat('${u}')">
-                <div class="ava" style="background:#2b5278">${u[0].toUpperCase()}</div>
-                <div style="flex:1">
-                    <div style="font-weight:bold">${u}</div>
-                    <div style="font-size:12px; opacity:0.5">Личные сообщения</div>
-                </div>
+                <div class="ava" style="background:#2b5278">${u[0].toUpperCase()}</div> <b>${u}</b>
             </div>`).join('');
     }
 
@@ -273,21 +235,17 @@ UI = """
                     lastId = m.id;
                     const div = document.createElement('div');
                     div.className = `msg ${m.sender === myName ? 'out' : 'in'}`;
-                    
                     let body = "";
-                    if(m.type === 'img') body = `<img src="${m.file}" onclick="window.open(this.src)" style="max-width:100%; border-radius:12px; cursor:pointer;">`;
-                    else if(m.type === 'audio') body = `<audio controls src="${m.file}" style="width:100%; min-width:150px;"></audio>`;
+                    if(m.type === 'img') body = `<img src="${m.file}" style="max-width:100%; border-radius:10px;">`;
+                    else if(m.type === 'audio') body = `<audio controls src="${m.file}" style="width:180px;"></audio>`;
                     else body = `<span>${m.content}</span>`;
-                    
-                    div.innerHTML = `<span class="msg-sender">${m.sender}</span>${body}<div class="time">${m.timestamp}</div>`;
+                    div.innerHTML = `<b style="font-size:11px; color:var(--blue)">${m.sender}</b><br>${body}<div style="font-size:10px; opacity:0.5; text-align:right;">${m.timestamp}</div>`;
                     f.appendChild(div);
                     f.scrollTop = f.scrollHeight;
-                    
                     if(m.sender !== myName) {
-                        document.getElementById('snd_in').play().catch(()=>{});
-                        if(navigator.vibrate) navigator.vibrate(100);
-                        if(document.hidden && Notification.permission === "granted") {
-                            new Notification("TegeGrom", { body: m.sender + ": " + m.content });
+                        document.getElementById('snd').play().catch(()=>{});
+                        if (Notification.permission === "granted") {
+                            new Notification("TegeGrom: " + m.sender, { body: m.content });
                         }
                     }
                 }
@@ -297,38 +255,30 @@ UI = """
 
     function upFile() {
         const file = document.getElementById('f-in').files[0];
-        if(!file) return;
         const reader = new FileReader();
-        reader.onload = () => send('img', '[Фотография]', reader.result);
+        reader.onload = () => send('img', '[Фото]', reader.result);
         reader.readAsDataURL(file);
     }
 
     async function toggleMic() {
         const mic = document.getElementById('mic');
-        if (!rec || rec.state === "inactive") {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            rec = new MediaRecorder(stream);
+        if (!mediaRec || mediaRec.state === "inactive") {
+            const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRec = new MediaRecorder(s);
             chunks = [];
-            rec.ondataavailable = e => chunks.push(e.data);
-            rec.onstop = () => {
-                const blob = new Blob(chunks, { type: 'audio/webm' });
-                const reader = new FileReader();
-                reader.onload = () => send('audio', '[Голосовое]', reader.result);
-                reader.readAsDataURL(blob);
+            mediaRec.ondataavailable = e => chunks.push(e.data);
+            mediaRec.onstop = () => {
+                const b = new Blob(chunks, { type: 'audio/webm' });
+                const r = new FileReader();
+                r.onload = () => send('audio', '[Голосовое]', r.result);
+                r.readAsDataURL(b);
             };
-            rec.start();
-            mic.classList.add('mic-rec');
+            mediaRec.start();
+            mic.classList.add('rec-active');
         } else {
-            rec.stop();
-            mic.classList.remove('mic-rec');
+            mediaRec.stop();
+            mic.classList.remove('rec-active');
         }
-    }
-
-    // Решение бага клавиатуры: скролл при изменении видимой области
-    if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', () => {
-            document.getElementById('feed').scrollTop = document.getElementById('feed').scrollHeight;
-        });
     }
 </script>
 </body>
