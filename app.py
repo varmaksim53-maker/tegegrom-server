@@ -4,9 +4,9 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from datetime import datetime
 
 app = FastAPI()
-DB = 'tegegrom_v29_titan.db'
+DB = 'tegegrom_v30_elite.db'
 
-# --- База данных (всё сохранено по твоему GitHub) ---
+# --- Инициализация БД ---
 def init_db():
     with sqlite3.connect(DB) as conn:
         conn.execute('''CREATE TABLE IF NOT EXISTS users (
@@ -22,20 +22,17 @@ init_db()
 
 def hash_pass(p): return hashlib.sha256(p.encode()).hexdigest()
 
-# Эндпоинт Service Worker (КЛЮЧ К УВЕДОМЛЕНИЯМ)
 @app.get("/sw.js", response_class=PlainTextResponse)
 async def get_sw():
     return """
     self.addEventListener('install', (e) => self.skipWaiting());
     self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
-    
     self.addEventListener('message', (event) => {
-        if (event.data && event.data.type === 'PUSH_NOTIF') {
+        if (event.data && event.data.type === 'PUSH') {
             self.registration.showNotification(event.data.title, {
                 body: event.data.body,
-                icon: 'https://cdn-icons-png.flaticon.com/512/5968/5968841.png',
-                vibrate: [200, 100, 200],
-                badge: 'https://cdn-icons-png.flaticon.com/512/5968/5968841.png'
+                icon: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/82/Telegram_logo.svg/2048px-Telegram_logo.svg.png',
+                vibrate: [200, 100, 200]
             });
         }
     });
@@ -91,100 +88,128 @@ UI = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=0">
+    
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>TegeGrom V29</title>
+    <meta name="apple-mobile-web-app-title" content="TegeGrom">
+    <link rel="apple-touch-icon" href="https://upload.wikimedia.org/wikipedia/commons/thumb/8/82/Telegram_logo.svg/2048px-Telegram_logo.svg.png">
+    
+    <title>TegeGrom Elite</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        :root { --bg: #0e1621; --side: #17212b; --blue: #0088cc; --txt: #f5f5f5; --in: #182533; --out: #2b5278; }
-        * { box-sizing: border-box; font-family: -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; }
+        :root { 
+            --bg: #0e1621; --side: #17212b; --blue: #2481cc; --txt: #ffffff; 
+            --in: #182533; --out: #2b5278; --glass: rgba(23, 33, 43, 0.85);
+        }
+        * { box-sizing: border-box; font-family: 'Segoe UI', Roboto, Helvetica, sans-serif; -webkit-tap-highlight-color: transparent; }
         body { margin: 0; background: var(--bg); color: var(--txt); height: 100vh; display: flex; overflow: hidden; width: 100vw; }
         
-        #auth { position: fixed; inset: 0; z-index: 9999; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 15px; }
-        .auth-box { background: var(--side); padding: 25px; border-radius: 20px; text-align: center; width: 100%; max-width: 320px; }
-        .auth-box input { width: 100%; padding: 12px; margin: 8px 0; border-radius: 10px; border: 1px solid #242f3d; background: #0b1118; color: white; outline: none; font-size: 16px; }
-        
-        #side { width: 300px; background: var(--side); border-right: 1px solid #000; display: flex; flex-direction: column; z-index: 500; transition: 0.3s ease; }
-        .chat-item { padding: 14px; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.1); display: flex; align-items: center; gap: 10px; }
-        .chat-item.active { background: var(--out); }
-        .ava { width: 42px; height: 42px; background: var(--blue); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+        /* Элитная авторизация */
+        #auth { position: fixed; inset: 0; z-index: 9999; background: radial-gradient(circle at center, #1e2c3a, #0e1621); display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .auth-box { background: var(--glass); backdrop-filter: blur(10px); padding: 40px; border-radius: 30px; text-align: center; width: 100%; max-width: 350px; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+        .auth-box input { width: 100%; padding: 15px; margin: 12px 0; border-radius: 15px; border: none; background: rgba(0,0,0,0.3); color: white; font-size: 16px; transition: 0.3s; }
+        .auth-box input:focus { background: rgba(0,0,0,0.5); box-shadow: 0 0 0 2px var(--blue); }
+        .auth-btn { width: 100%; padding: 15px; background: var(--blue); border: none; color: white; border-radius: 15px; font-weight: 600; font-size: 18px; cursor: pointer; margin-top: 10px; box-shadow: 0 4px 15px rgba(36, 129, 204, 0.4); }
 
-        #main { flex: 1; display: flex; flex-direction: column; background: #0e1117; position: relative; width: 100%; }
-        #feed { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; padding-bottom: 160px; scroll-behavior: smooth; }
+        /* Список чатов */
+        #side { width: 320px; background: var(--side); border-right: 1px solid rgba(0,0,0,0.3); display: flex; flex-direction: column; z-index: 500; }
+        .side-head { padding: 25px 20px; font-size: 22px; font-weight: 700; color: var(--blue); letter-spacing: -0.5px; }
+        .chat-item { padding: 15px 18px; cursor: pointer; display: flex; align-items: center; gap: 15px; transition: 0.2s; position: relative; }
+        .chat-item:hover { background: rgba(255,255,255,0.03); }
+        .chat-item.active { background: var(--out); }
+        .ava { width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); background: linear-gradient(135deg, #2481cc, #005588); }
+
+        /* Чат */
+        #main { flex: 1; display: flex; flex-direction: column; background: #0e1117; position: relative; }
+        .top-bar { padding: 12px 18px; background: var(--glass); backdrop-filter: blur(10px); display: flex; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.05); z-index: 400; min-height: 65px; }
         
-        .msg { max-width: 85%; padding: 10px 14px; border-radius: 18px; font-size: 15px; line-height: 1.4; position: relative; }
+        #feed { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 10px; padding-bottom: 200px; }
+        
+        .msg { max-width: 82%; padding: 12px 16px; border-radius: 20px; font-size: 15.5px; line-height: 1.4; position: relative; box-shadow: 0 2px 5px rgba(0,0,0,0.1); animation: slideIn 0.2s ease-out; }
+        @keyframes slideIn { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         .msg.out { align-self: flex-end; background: var(--out); border-bottom-right-radius: 4px; }
         .msg.in { align-self: flex-start; background: var(--in); border-bottom-left-radius: 4px; }
-        
+        .msg b { color: #82b1ff; font-size: 12px; }
+        .time { font-size: 10px; opacity: 0.5; text-align: right; margin-top: 4px; }
+
+        /* ПРЕМИАЛЬНАЯ ПАНЕЛЬ ВВОДА */
         .bar { 
-            padding: 10px 12px; background: var(--side); display: none; align-items: center; gap: 8px; 
-            padding-bottom: calc(55px + env(safe-area-inset-bottom)); 
-            border-top: 1px solid rgba(255,255,255,0.05); position: absolute; bottom: 0; left: 0; right: 0; z-index: 1000;
+            padding: 10px 15px; 
+            background: var(--glass); 
+            backdrop-filter: blur(15px);
+            display: none; 
+            align-items: center; 
+            gap: 12px; 
+            padding-bottom: calc(65px + env(safe-area-inset-bottom)); 
+            position: absolute; bottom: 0; left: 0; right: 0; z-index: 1000;
+            border-top: 1px solid rgba(255,255,255,0.05);
         }
-        .inp { flex: 1; background: #0b1118; border: none; padding: 10px 15px; color: white; border-radius: 20px; font-size: 16px; min-width: 0; }
-        .btn-send { width: 40px; height: 40px; background: none; border: none; color: var(--blue); font-size: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-        .icon { color: var(--blue); font-size: 22px; cursor: pointer; flex-shrink: 0; }
-        .rec-active { color: #ff5f5f !important; animation: pulse 1s infinite; }
-        @keyframes pulse { 50% { opacity: 0.5; } }
+        .inp-container { flex: 1; background: rgba(0,0,0,0.2); border-radius: 25px; padding: 5px 15px; display: flex; align-items: center; }
+        .inp { width: 100%; background: none; border: none; padding: 10px 0; color: white; font-size: 16px; outline: none; }
+        .icon-btn { color: var(--blue); font-size: 24px; cursor: pointer; transition: 0.2s; flex-shrink: 0; }
+        .icon-btn:active { transform: scale(0.9); opacity: 0.7; }
+        .send-btn { background: var(--blue); width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; border: none; box-shadow: 0 4px 10px rgba(36, 129, 204, 0.3); }
 
         @media (max-width: 700px) {
             #side { position: absolute; width: 100%; height: 100%; left: 0; }
             body.chatting #side { transform: translateX(-100%); }
             .back { display: block !important; }
         }
-        .back { display: none; margin-right: 10px; cursor: pointer; font-size: 22px; color: var(--blue); }
+        .back { display: none; margin-right: 15px; font-size: 22px; color: var(--blue); cursor: pointer; }
     </style>
 </head>
 <body>
 
 <div id="auth">
     <div class="auth-box">
-        <h3 style="color:var(--blue); margin-bottom:15px;">TegeGrom</h3>
+        <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/82/Telegram_logo.svg/2048px-Telegram_logo.svg.png" style="width:70px; margin-bottom:15px;">
+        <h2 style="margin:0; font-weight:700;">TegeGrom Elite</h2>
+        <p style="opacity:0.5; font-size:14px; margin-bottom:20px;">Premium Messaging Experience</p>
         <input type="text" id="a-user" placeholder="Логин">
         <input type="password" id="a-pass" placeholder="Пароль">
-        <button onclick="doAuth()" style="width:100%; padding:12px; background:var(--blue); border:none; color:white; border-radius:10px; font-weight:bold; cursor:pointer;">ВОЙТИ</button>
-        <p id="auth-err" style="color:#ff5f5f; font-size:12px;"></p>
+        <button class="auth-btn" onclick="doAuth()">Войти</button>
+        <p id="auth-err" style="color:#ff5f5f; font-size:12px; margin-top:10px;"></p>
     </div>
 </div>
 
 <div id="side">
-    <div style="padding:20px 15px; font-weight:bold; font-size:20px;">Чаты</div>
+    <div class="side-head">Чаты</div>
     <div class="chat-item" id="btn-all" onclick="selectChat('all')">
-        <div class="ava" style="background:#0088cc">📢</div> <b>Общий чат</b>
+        <div class="ava" style="background: linear-gradient(135deg, #0088cc, #00c6ff)">📢</div>
+        <div><b>Общий чат</b><br><small style="opacity:0.5">Публичная переписка</small></div>
     </div>
     <div id="contacts-list" style="overflow-y:auto; flex:1;"></div>
 </div>
 
 <div id="main">
-    <div style="padding:12px 15px; background:var(--side); display:flex; align-items:center; min-height:55px;">
+    <div class="top-bar">
         <i class="fa-solid fa-chevron-left back" onclick="closeChat()"></i>
-        <b id="h-title" style="font-size:17px;">TegeGrom</b>
+        <div class="ava" id="h-ava" style="width:35px; height:35px; font-size:15px; margin-right:12px;">📢</div>
+        <b id="h-title" style="font-size:18px;">TegeGrom</b>
     </div>
     <div id="feed"></div>
     <div class="bar" id="input-bar">
-        <label class="icon"><i class="fa-solid fa-paperclip"></i><input type="file" id="f-in" hidden onchange="upFile()"></label>
-        <input type="text" id="m-in" class="inp" placeholder="Текст..." onkeypress="if(event.key==='Enter')send('text')">
-        <i class="fa-solid fa-microphone icon" id="mic" onclick="toggleMic()"></i>
-        <button class="btn-send" onclick="send('text')"><i class="fa-solid fa-paper-plane"></i></button>
+        <label class="icon-btn"><i class="fa-solid fa-paperclip"></i><input type="file" id="f-in" hidden onchange="upFile()"></label>
+        <div class="inp-container">
+            <input type="text" id="m-in" class="inp" placeholder="Написать сообщение..." onkeypress="if(event.key==='Enter')send('text')">
+            <i class="fa-solid fa-microphone icon-btn" id="mic" onclick="toggleMic()" style="margin-left:10px;"></i>
+        </div>
+        <button class="send-btn" onclick="send('text')"><i class="fa-solid fa-arrow-up"></i></button>
     </div>
 </div>
 
 <audio id="snd" src="https://raw.githubusercontent.com/Anonym761/archive/main/msg.mp3" preload="auto"></audio>
 
 <script>
-    let myName = localStorage.getItem('tg_v29_u') || "";
+    let myName = localStorage.getItem('tg_v30_u') || "";
     let target = "";
     let lastId = 0;
     let mediaRec;
     let chunks = [];
     let swReg = null;
 
-    // РЕГИСТРАЦИЯ SW ДЛЯ УБОЙНЫХ ПУШЕЙ
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js').then(reg => {
-            swReg = reg;
-            console.log("SW Ready");
-        });
+        navigator.serviceWorker.register('/sw.js').then(r => swReg = r);
     }
 
     if(myName) { 
@@ -199,8 +224,8 @@ UI = """
         const r = await fetch('/api/auth', {method:'POST', body:JSON.stringify({u, p}), headers:{'Content-Type':'application/json'}});
         const res = await r.json();
         if(res.ok) { 
-            localStorage.setItem('tg_v29_u', res.user); 
-            if (Notification.permission !== "granted") await Notification.requestPermission();
+            localStorage.setItem('tg_v30_u', res.user); 
+            Notification.requestPermission();
             location.reload(); 
         } else { document.getElementById('auth-err').innerText = res.msg; }
     }
@@ -209,11 +234,13 @@ UI = """
         setInterval(sync, 1500);
         setInterval(loadUsers, 5000);
         loadUsers();
+        navigator.mediaDevices.getUserMedia({ audio: true }).catch(()=>{});
     }
 
     function selectChat(t) {
         target = t; lastId = 0;
         document.getElementById('h-title').innerText = t === 'all' ? 'Общий чат' : t;
+        document.getElementById('h-ava').innerText = t === 'all' ? '📢' : t[0].toUpperCase();
         document.getElementById('feed').innerHTML = '';
         document.getElementById('input-bar').style.display = 'flex';
         document.body.classList.add('chatting');
@@ -232,7 +259,8 @@ UI = """
         const list = document.getElementById('contacts-list');
         list.innerHTML = users.filter(u => u !== myName).map(u => `
             <div class="chat-item ${target===u?'active':''}" onclick="selectChat('${u}')">
-                <div class="ava" style="background:#2b5278">${u[0].toUpperCase()}</div> <b>${u}</b>
+                <div class="ava">${u[0].toUpperCase()}</div>
+                <div><b>${u}</b><br><small style="opacity:0.4">Нажмите, чтобы открыть</small></div>
             </div>`).join('');
     }
 
@@ -256,22 +284,16 @@ UI = """
                     lastId = m.id;
                     const div = document.createElement('div');
                     div.className = `msg ${m.sender === myName ? 'out' : 'in'}`;
-                    let b = m.type==='img' ? `<img src="${m.file}" style="max-width:100%;border-radius:10px;">` : (m.type==='audio' ? `<audio controls src="${m.file}" style="width:180px;"></audio>` : `<span>${m.content}</span>`);
-                    div.innerHTML = `<b style="font-size:11px; color:var(--blue)">${m.sender}</b><br>${b}<div style="font-size:10px; opacity:0.5; text-align:right;">${m.timestamp}</div>`;
+                    let b = m.type==='img' ? `<img src="${m.file}" style="max-width:100%;border-radius:15px;">` : (m.type==='audio' ? `<audio controls src="${m.file}" style="width:200px;"></audio>` : `<span>${m.content}</span>`);
+                    div.innerHTML = `<b>${m.sender}</b><br>${b}<div class="time">${m.timestamp}</div>`;
                     f.appendChild(div);
                     f.scrollTop = f.scrollHeight;
                     
                     if(m.sender !== myName) {
                         document.getElementById('snd').play().catch(()=>{});
-                        if(navigator.vibrate) navigator.vibrate([100, 50, 100]);
-                        
-                        // ОТПРАВЛЯЕМ КОМАНДУ В SERVICE WORKER ДЛЯ ПУША
-                        if (swReg && Notification.permission === "granted") {
-                            swReg.active.postMessage({
-                                type: 'PUSH_NOTIF',
-                                title: "TegeGrom: " + m.sender,
-                                body: m.content
-                            });
+                        if(navigator.vibrate) navigator.vibrate(200);
+                        if(swReg && Notification.permission === "granted") {
+                            swReg.active.postMessage({ type: 'PUSH', title: m.sender, body: m.content });
                         }
                     }
                 }
@@ -300,10 +322,10 @@ UI = """
                 r.readAsDataURL(b);
             };
             mediaRec.start();
-            mic.classList.add('rec-active');
+            mic.style.color = '#ff5f5f';
         } else {
             mediaRec.stop();
-            mic.classList.remove('rec-active');
+            mic.style.color = 'var(--blue)';
         }
     }
 </script>
