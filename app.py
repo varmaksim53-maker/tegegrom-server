@@ -31,7 +31,7 @@ async def get_sw():
         if (event.data && event.data.type === 'PUSH') {
             self.registration.showNotification(event.data.title, {
                 body: event.data.body,
-                icon: 'https://github.com/varmaksim53-maker/tegegrom-server/blob/main/856d46aa-f759-4dc3-9367-6637feb48805.jpg',
+                icon: 'https://raw.githubusercontent.com/varmaksim53-maker/tegegrom-server/main/856d46aa-f759-4dc3-9367-6637feb48805-no-bg-preview%20(carve.photos).png',
                 vibrate: [200, 100, 200]
             });
         }
@@ -92,7 +92,7 @@ UI = """
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="TegeGrom">
-    <link rel="apple-touch-icon" href="https://github.com/varmaksim53-maker/tegegrom-server/blob/main/856d46aa-f759-4dc3-9367-6637feb48805-no-bg-preview%20(carve.photos).png">
+    <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/varmaksim53-maker/tegegrom-server/main/856d46aa-f759-4dc3-9367-6637feb48805-no-bg-preview%20(carve.photos).png">
     
     <title>TegeGrom</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -162,7 +162,7 @@ UI = """
 
 <div id="auth">
     <div class="auth-box">
-        <img src="https://github.com/varmaksim53-maker/tegegrom-server/blob/main/856d46aa-f759-4dc3-9367-6637feb48805-no-bg-preview%20(carve.photos).png" style="width:70px; margin-bottom:15px;">
+        <img src="https://raw.githubusercontent.com/varmaksim53-maker/tegegrom-server/main/856d46aa-f759-4dc3-9367-6637feb48805-no-bg-preview%20(carve.photos).png" style="width:70px; margin-bottom:15px;">
         <h2 style="margin:0; font-weight:700;">TegeGrom</h2>
         <p style="opacity:0.5; font-size:14px; margin-bottom:20px;">Premium Messaging Experience</p>
         <input type="text" id="a-user" placeholder="Логин">
