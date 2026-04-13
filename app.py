@@ -31,7 +31,7 @@ async def get_sw():
         if (event.data && event.data.type === 'PUSH') {
             self.registration.showNotification(event.data.title, {
                 body: event.data.body,
-                icon: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/82/Telegram_logo.svg/2048px-Telegram_logo.svg.png',
+                icon: 'https://ibb.co/sJdRtvVm',
                 vibrate: [200, 100, 200]
             });
         }
@@ -92,7 +92,7 @@ UI = """
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="TegeGrom">
-    <link rel="apple-touch-icon" href="https://upload.wikimedia.org/wikipedia/commons/thumb/8/82/Telegram_logo.svg/2048px-Telegram_logo.svg.png">
+    <link rel="apple-touch-icon" href="https://ibb.co/sJdRtvVm">
     
     <title>TegeGrom</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
