@@ -173,10 +173,10 @@ UI = """
 </div>
 
 <div id="side">
-    <div class="side-head">Tegegrom✔</div>
+    <div class="side-head">Tegegrom</div>
     <div class="chat-item" id="btn-all" onclick="selectChat('all')">
         <div class="ava" style="background: linear-gradient(135deg, #0088cc, #00c6ff)">📨</div>
-        <div><b>🟥Главный Чат🟥</b><br><small style="opacity:0.5">Могут переписыватся все</small></div>
+        <div><b>Главный Чат</b><br><small style="opacity:0.5">Могут переписыватся все</small></div>
     </div>
     <div id="contacts-list" style="overflow-y:auto; flex:1;"></div>
 </div>
