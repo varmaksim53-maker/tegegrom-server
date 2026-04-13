@@ -4,9 +4,9 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from datetime import datetime
 
 app = FastAPI()
-DB = 'tegegrom_v33_classic.db'
+DB = 'tegegrom_v33_final.db'
 
-# --- База данных ---
+# --- Инициализация Базы Данных ---
 def init_db():
     with sqlite3.connect(DB) as conn:
         conn.execute('''CREATE TABLE IF NOT EXISTS users (
@@ -22,7 +22,7 @@ init_db()
 
 def hash_pass(p): return hashlib.sha256(p.encode()).hexdigest()
 
-# --- Service Worker (нужен для статуса "Приложение") ---
+# --- Service Worker для PWA и Уведомлений ---
 @app.get("/sw.js", response_class=PlainTextResponse)
 async def get_sw():
     return """
@@ -83,7 +83,7 @@ async def send_msg(d: dict):
         conn.commit()
     return {"ok": True}
 
-# --- Интерфейс ---
+# --- ИНТЕРФЕЙС ---
 UI = """
 <!DOCTYPE html>
 <html lang="ru">
@@ -104,19 +104,29 @@ UI = """
         body { margin: 0; background: var(--bg); color: var(--txt); height: 100vh; display: flex; overflow: hidden; }
         
         #auth { position: fixed; inset: 0; z-index: 9999; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 20px; }
-        .auth-box { background: var(--side); padding: 30px; border-radius: 20px; text-align: center; width: 100%; max-width: 320px; border: 1px solid rgba(255,255,255,0.05); }
+        .auth-box { background: var(--side); padding: 30px; border-radius: 20px; text-align: center; width: 100%; max-width: 320px; }
         .auth-box input { width: 100%; padding: 12px; margin: 10px 0; border-radius: 10px; border: 1px solid #242f3d; background: #0b1118; color: white; outline: none; }
 
         #side { width: 300px; background: var(--side); border-right: 1px solid rgba(0,0,0,0.2); display: flex; flex-direction: column; z-index: 500; }
-        .chat-item { padding: 14px 18px; cursor: pointer; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid rgba(0,0,0,0.05); }
+        .chat-item { padding: 14px 18px; cursor: pointer; display: flex; align-items: center; gap: 12px; }
         .chat-item.active { background: var(--out); }
         .ava { width: 45px; height: 45px; background: var(--blue); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
 
         #main { flex: 1; display: flex; flex-direction: column; background: #0e1117; position: relative; }
-        .top-bar { padding: 10px 15px; background: var(--side); display: flex; align-items: center; min-height: 60px; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        #feed { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; padding-bottom: 100px; }
+        .top-bar { padding: 10px 15px; background: var(--side); display: flex; align-items: center; min-height: 60px; }
         
-        .msg { max-width: 85%; padding: 10px 14px; border-radius: 15px; font-size: 15px; }
+        /* Исправлено: увеличен отступ снизу, чтобы сообщения не уходили под бар */
+        #feed { 
+            flex: 1; 
+            overflow-y: auto; 
+            padding: 12px; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 8px; 
+            padding-bottom: 150px; 
+        }
+        
+        .msg { max-width: 85%; padding: 10px 14px; border-radius: 15px; font-size: 15px; line-height: 1.4; }
         .msg.out { align-self: flex-end; background: var(--out); border-bottom-right-radius: 4px; }
         .msg.in { align-self: flex-start; background: var(--in); border-bottom-left-radius: 4px; }
 
@@ -127,7 +137,9 @@ UI = """
             align-items: center; 
             gap: 10px; 
             position: absolute; bottom: 0; left: 0; right: 0; 
+            /* Исправлено: поддержка безопасных зон для безрамочных экранов */
             padding-bottom: calc(15px + env(safe-area-inset-bottom));
+            z-index: 1000;
         }
         .inp-wrap { flex: 1; background: #0b1118; border-radius: 20px; padding: 5px 15px; display: flex; align-items: center; }
         .inp { width: 100%; background: none; border: none; padding: 8px 0; color: white; outline: none; font-size: 16px; }
@@ -150,7 +162,7 @@ UI = """
         <h2 style="margin:15px 0;">TegeGrom</h2>
         <input type="text" id="a-user" placeholder="Логин">
         <input type="password" id="a-pass" placeholder="Пароль">
-        <button onclick="doAuth()" style="width:100%; padding:14px; background:var(--blue); border:none; color:white; border-radius:12px; font-weight:bold; cursor:pointer;">ВОЙТИ</button>
+        <button onclick="doAuth()" style="width:100%; padding:14px; background:var(--blue); border:none; color:white; border-radius:12px; font-weight:bold;">ВОЙТИ</button>
         <p id="auth-err" style="color:#ff5f5f; font-size:12px;"></p>
     </div>
 </div>
@@ -181,7 +193,7 @@ UI = """
 <audio id="snd" src="https://raw.githubusercontent.com/Anonym761/archive/main/msg.mp3"></audio>
 
 <script>
-    let myName = localStorage.getItem('tg_classic_u') || "";
+    let myName = localStorage.getItem('tg_final_u') || "";
     let target = "";
     let lastId = 0;
     let swReg = null;
@@ -202,7 +214,7 @@ UI = """
         const r = await fetch('/api/auth', {method:'POST', body:JSON.stringify({u, p}), headers:{'Content-Type':'application/json'}});
         const res = await r.json();
         if(res.ok) { 
-            localStorage.setItem('tg_classic_u', res.user); 
+            localStorage.setItem('tg_final_u', res.user); 
             Notification.requestPermission();
             location.reload(); 
         } else { document.getElementById('auth-err').innerText = res.msg; }
@@ -262,7 +274,10 @@ UI = """
                     let b = m.type==='img' ? `<img src="${m.file}" style="max-width:100%;border-radius:10px;">` : `<span>${m.content}</span>`;
                     div.innerHTML = `<b>${m.sender}</b><br>${b}<div style="font-size:10px; opacity:0.5; text-align:right;">${m.timestamp}</div>`;
                     f.appendChild(div);
-                    f.scrollTop = f.scrollHeight;
+                    
+                    // Исправлено: автоматический скролл вниз при новом сообщении
+                    setTimeout(() => { f.scrollTop = f.scrollHeight; }, 50);
+
                     if(m.sender !== myName) {
                         document.getElementById('snd').play().catch(()=>{});
                         if(swReg && Notification.permission === "granted") {
