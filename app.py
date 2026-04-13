@@ -94,7 +94,7 @@ UI = """
     <meta name="apple-mobile-web-app-title" content="TegeGrom">
     <link rel="apple-touch-icon" href="https://upload.wikimedia.org/wikipedia/commons/thumb/8/82/Telegram_logo.svg/2048px-Telegram_logo.svg.png">
     
-    <title>TegeGrom Elite</title>
+    <title>TegeGrom</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root { 
@@ -173,10 +173,10 @@ UI = """
 </div>
 
 <div id="side">
-    <div class="side-head">Чаты</div>
+    <div class="side-head">Tegegrom✔</div>
     <div class="chat-item" id="btn-all" onclick="selectChat('all')">
-        <div class="ava" style="background: linear-gradient(135deg, #0088cc, #00c6ff)">📢</div>
-        <div><b>Общий чат</b><br><small style="opacity:0.5">Публичная переписка</small></div>
+        <div class="ava" style="background: linear-gradient(135deg, #0088cc, #00c6ff)">📨</div>
+        <div><b>🟥Главный Чат🟥</b><br><small style="opacity:0.5">Могут переписыватся все</small></div>
     </div>
     <div id="contacts-list" style="overflow-y:auto; flex:1;"></div>
 </div>
