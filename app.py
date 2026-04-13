@@ -4,9 +4,9 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from datetime import datetime
 
 app = FastAPI()
-DB = 'tegegrom_v28_final.db'
+DB = 'tegegrom_v29_titan.db'
 
-# --- Инициализация БД (все как на GitHub) ---
+# --- База данных (всё сохранено по твоему GitHub) ---
 def init_db():
     with sqlite3.connect(DB) as conn:
         conn.execute('''CREATE TABLE IF NOT EXISTS users (
@@ -22,9 +22,24 @@ init_db()
 
 def hash_pass(p): return hashlib.sha256(p.encode()).hexdigest()
 
+# Эндпоинт Service Worker (КЛЮЧ К УВЕДОМЛЕНИЯМ)
 @app.get("/sw.js", response_class=PlainTextResponse)
 async def get_sw():
-    return "self.addEventListener('push', function(e) { console.log('Push Rec'); });"
+    return """
+    self.addEventListener('install', (e) => self.skipWaiting());
+    self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+    
+    self.addEventListener('message', (event) => {
+        if (event.data && event.data.type === 'PUSH_NOTIF') {
+            self.registration.showNotification(event.data.title, {
+                body: event.data.body,
+                icon: 'https://cdn-icons-png.flaticon.com/512/5968/5968841.png',
+                vibrate: [200, 100, 200],
+                badge: 'https://cdn-icons-png.flaticon.com/512/5968/5968841.png'
+            });
+        }
+    });
+    """
 
 @app.get("/", response_class=HTMLResponse)
 async def index(): return UI
@@ -72,11 +87,13 @@ async def send_msg(d: dict):
 
 UI = """
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=0">
-    <title>Tegegrom</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>TegeGrom V29</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root { --bg: #0e1621; --side: #17212b; --blue: #0088cc; --txt: #f5f5f5; --in: #182533; --out: #2b5278; }
@@ -85,7 +102,7 @@ UI = """
         
         #auth { position: fixed; inset: 0; z-index: 9999; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 15px; }
         .auth-box { background: var(--side); padding: 25px; border-radius: 20px; text-align: center; width: 100%; max-width: 320px; }
-        .auth-box input { width: 100%; padding: 12px; margin: 8px 0; border-radius: 10px; border: 1px solid #242f3d; background: #0b1118; color: white; outline: none; }
+        .auth-box input { width: 100%; padding: 12px; margin: 8px 0; border-radius: 10px; border: 1px solid #242f3d; background: #0b1118; color: white; outline: none; font-size: 16px; }
         
         #side { width: 300px; background: var(--side); border-right: 1px solid #000; display: flex; flex-direction: column; z-index: 500; transition: 0.3s ease; }
         .chat-item { padding: 14px; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.1); display: flex; align-items: center; gap: 10px; }
@@ -99,14 +116,14 @@ UI = """
         .msg.out { align-self: flex-end; background: var(--out); border-bottom-right-radius: 4px; }
         .msg.in { align-self: flex-start; background: var(--in); border-bottom-left-radius: 4px; }
         
-        /* ПАНЕЛЬ ВВОДА - ФИКС ДЛЯ iPHONE 5 */
         .bar { 
             padding: 10px 12px; background: var(--side); display: none; align-items: center; gap: 8px; 
-            padding-bottom: calc(50px + env(safe-area-inset-bottom)); 
+            padding-bottom: calc(55px + env(safe-area-inset-bottom)); 
             border-top: 1px solid rgba(255,255,255,0.05); position: absolute; bottom: 0; left: 0; right: 0; z-index: 1000;
         }
         .inp { flex: 1; background: #0b1118; border: none; padding: 10px 15px; color: white; border-radius: 20px; font-size: 16px; min-width: 0; }
-        .icon { color: var(--blue); font-size: 24px; cursor: pointer; flex-shrink: 0; }
+        .btn-send { width: 40px; height: 40px; background: none; border: none; color: var(--blue); font-size: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .icon { color: var(--blue); font-size: 22px; cursor: pointer; flex-shrink: 0; }
         .rec-active { color: #ff5f5f !important; animation: pulse 1s infinite; }
         @keyframes pulse { 50% { opacity: 0.5; } }
 
@@ -148,26 +165,30 @@ UI = """
         <label class="icon"><i class="fa-solid fa-paperclip"></i><input type="file" id="f-in" hidden onchange="upFile()"></label>
         <input type="text" id="m-in" class="inp" placeholder="Текст..." onkeypress="if(event.key==='Enter')send('text')">
         <i class="fa-solid fa-microphone icon" id="mic" onclick="toggleMic()"></i>
-        <i class="fa-solid fa-paper-plane icon" onclick="send('text')"></i>
+        <button class="btn-send" onclick="send('text')"><i class="fa-solid fa-paper-plane"></i></button>
     </div>
 </div>
 
-<audio id="snd" src="https://raw.githubusercontent.com/Anonym761/archive/main/msg.mp3"></audio>
+<audio id="snd" src="https://raw.githubusercontent.com/Anonym761/archive/main/msg.mp3" preload="auto"></audio>
 
 <script>
-    let myName = localStorage.getItem('tg_v28_u') || "";
+    let myName = localStorage.getItem('tg_v29_u') || "";
     let target = "";
     let lastId = 0;
     let mediaRec;
     let chunks = [];
+    let swReg = null;
 
+    // РЕГИСТРАЦИЯ SW ДЛЯ УБОЙНЫХ ПУШЕЙ
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js');
+        navigator.serviceWorker.register('/sw.js').then(reg => {
+            swReg = reg;
+            console.log("SW Ready");
+        });
     }
 
     if(myName) { 
         document.getElementById('auth').style.display='none'; 
-        if (Notification.permission !== "granted") Notification.requestPermission();
         startApp(); 
     }
 
@@ -178,8 +199,8 @@ UI = """
         const r = await fetch('/api/auth', {method:'POST', body:JSON.stringify({u, p}), headers:{'Content-Type':'application/json'}});
         const res = await r.json();
         if(res.ok) { 
-            localStorage.setItem('tg_v28_u', res.user); 
-            Notification.requestPermission();
+            localStorage.setItem('tg_v29_u', res.user); 
+            if (Notification.permission !== "granted") await Notification.requestPermission();
             location.reload(); 
         } else { document.getElementById('auth-err').innerText = res.msg; }
     }
@@ -235,17 +256,22 @@ UI = """
                     lastId = m.id;
                     const div = document.createElement('div');
                     div.className = `msg ${m.sender === myName ? 'out' : 'in'}`;
-                    let body = "";
-                    if(m.type === 'img') body = `<img src="${m.file}" style="max-width:100%; border-radius:10px;">`;
-                    else if(m.type === 'audio') body = `<audio controls src="${m.file}" style="width:180px;"></audio>`;
-                    else body = `<span>${m.content}</span>`;
-                    div.innerHTML = `<b style="font-size:11px; color:var(--blue)">${m.sender}</b><br>${body}<div style="font-size:10px; opacity:0.5; text-align:right;">${m.timestamp}</div>`;
+                    let b = m.type==='img' ? `<img src="${m.file}" style="max-width:100%;border-radius:10px;">` : (m.type==='audio' ? `<audio controls src="${m.file}" style="width:180px;"></audio>` : `<span>${m.content}</span>`);
+                    div.innerHTML = `<b style="font-size:11px; color:var(--blue)">${m.sender}</b><br>${b}<div style="font-size:10px; opacity:0.5; text-align:right;">${m.timestamp}</div>`;
                     f.appendChild(div);
                     f.scrollTop = f.scrollHeight;
+                    
                     if(m.sender !== myName) {
                         document.getElementById('snd').play().catch(()=>{});
-                        if (Notification.permission === "granted") {
-                            new Notification("TegeGrom: " + m.sender, { body: m.content });
+                        if(navigator.vibrate) navigator.vibrate([100, 50, 100]);
+                        
+                        // ОТПРАВЛЯЕМ КОМАНДУ В SERVICE WORKER ДЛЯ ПУША
+                        if (swReg && Notification.permission === "granted") {
+                            swReg.active.postMessage({
+                                type: 'PUSH_NOTIF',
+                                title: "TegeGrom: " + m.sender,
+                                body: m.content
+                            });
                         }
                     }
                 }
